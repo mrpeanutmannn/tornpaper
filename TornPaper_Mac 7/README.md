@@ -59,6 +59,22 @@ Make sure `AE_SDK_PATH` is set correctly and points to the SDK folder containing
 - Check that the .plugin file was built to the correct location
 - Try restarting After Effects
 - Check Console.app for any loading errors
+- On macOS, remove quarantine attributes if the plugin was copied from another machine:
+  ```bash
+  xattr -dr com.apple.quarantine "$HOME/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore/TornPaper.plugin"
+  ```
+- Verify the target writes directly to MediaCore on build (Cmd+B) by checking:
+  ```bash
+  ls -la "$HOME/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore/TornPaper.plugin"
+  ```
+- Verify the effect entry point symbol exists in the built binary (missing symbol means AE cannot instantiate the effect):
+  ```bash
+  nm -gjU "$HOME/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore/TornPaper.plugin/Contents/MacOS/TornPaper" | rg "^_EffectMain$"
+  ```
+- Verify PiPL is embedded in the plugin bundle:
+  ```bash
+  DeRez -only PiPL "$HOME/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore/TornPaper.plugin" | head
+  ```
 
 ### Build errors about missing types
 The SDK requires specific versions of Xcode. If you get type errors, make sure you're using a compatible Xcode version.
