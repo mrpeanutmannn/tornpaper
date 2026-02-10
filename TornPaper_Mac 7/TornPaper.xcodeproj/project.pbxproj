@@ -81,6 +81,7 @@
 				1A0000070000000000000001 /* Sources */,
 				1A0000040000000000000001 /* Frameworks */,
 				1A0000070000000000000002 /* Resources */,
+				1A0000070000000000000005 /* Compile PiPL Resource */,
 				1A0000070000000000000003 /* Copy Bundle */,
 			);
 			buildRules = (
@@ -124,11 +125,29 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1A0000010000000000000002 /* TornPaperEdge_PiPL.r in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		1A0000070000000000000005 /* Compile PiPL Resource */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/src/TornPaperEdge_PiPL.r",
+			);
+			name = "Compile PiPL Resource";
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/TornPaperEdge.rsrc",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "/usr/bin/Rez \"$SRCROOT/src/TornPaperEdge_PiPL.r\" -o \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/TornPaperEdge.rsrc\" -useDF -d AE_OS_MAC -i \"$SRCROOT/include\" -i \"/Users/me/Downloads/AfterEffectsSDK_25.6_61_mac/ae25.6_61.64bit.AfterEffectsSDK/Examples/Headers\" -i \"/Users/me/Downloads/AfterEffectsSDK_25.6_61_mac/ae25.6_61.64bit.AfterEffectsSDK/Examples/Resources\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		1A0000070000000000000001 /* Sources */ = {
