@@ -284,13 +284,11 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CONFIGURATION_BUILD_DIR = "$(HOME)/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore";
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = NO;
 				EXECUTABLE_NAME = TornPaper;
 				EXECUTABLE_PREFIX = "";
 				EXPORTED_SYMBOLS_FILE = "$(SRCROOT)/src/TornPaper.exports";
-				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/include",
@@ -299,10 +297,7 @@
 					"/Users/me/Downloads/AfterEffectsSDK_25.6_61_mac/ae25.6_61.64bit.AfterEffectsSDK/Examples/Util",
 					"/Users/me/Downloads/AfterEffectsSDK_25.6_61_mac/ae25.6_61.64bit.AfterEffectsSDK/Examples/Resources",
 				);
-				INFOPLIST_KEY_CFBundlePackageType = eFKT;
-				INFOPLIST_KEY_CFBundleDisplayName = "Torn Paper";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSPrincipalClass = "";
+				INFOPLIST_FILE = "$(SRCROOT)/Info.plist";
 				INSTALL_PATH = "$(HOME)/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
@@ -324,13 +319,11 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CONFIGURATION_BUILD_DIR = "$(HOME)/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore";
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = NO;
 				EXECUTABLE_NAME = TornPaper;
 				EXECUTABLE_PREFIX = "";
 				EXPORTED_SYMBOLS_FILE = "$(SRCROOT)/src/TornPaper.exports";
-				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/include",
@@ -339,10 +332,7 @@
 					"/Users/me/Downloads/AfterEffectsSDK_25.6_61_mac/ae25.6_61.64bit.AfterEffectsSDK/Examples/Util",
 					"/Users/me/Downloads/AfterEffectsSDK_25.6_61_mac/ae25.6_61.64bit.AfterEffectsSDK/Examples/Resources",
 				);
-				INFOPLIST_KEY_CFBundlePackageType = eFKT;
-				INFOPLIST_KEY_CFBundleDisplayName = "Torn Paper";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSPrincipalClass = "";
+				INFOPLIST_FILE = "$(SRCROOT)/Info.plist";
 				INSTALL_PATH = "$(HOME)/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
