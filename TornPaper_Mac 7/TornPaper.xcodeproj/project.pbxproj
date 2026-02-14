@@ -290,6 +290,7 @@
 				EXECUTABLE_PREFIX = "";
 				EXPORTED_SYMBOLS_FILE = "$(SRCROOT)/src/TornPaper.exports";
 				GENERATE_INFOPLIST_FILE = NO;
+				GENERATE_PKGINFO_FILE = YES;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/include",
@@ -326,6 +327,7 @@
 				EXECUTABLE_PREFIX = "";
 				EXPORTED_SYMBOLS_FILE = "$(SRCROOT)/src/TornPaper.exports";
 				GENERATE_INFOPLIST_FILE = NO;
+				GENERATE_PKGINFO_FILE = YES;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/include",
