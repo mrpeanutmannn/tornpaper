@@ -78,11 +78,9 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 1A0000080000000000000001 /* Build configuration list for PBXNativeTarget "TornPaper" */;
 			buildPhases = (
+				1A0000070000000000000002 /* Resources */,
 				1A0000070000000000000001 /* Sources */,
 				1A0000040000000000000001 /* Frameworks */,
-				1A0000070000000000000002 /* Resources */,
-				1A0000070000000000000005 /* Compile PiPL Resource */,
-				1A0000070000000000000003 /* Copy Bundle */,
 			);
 			buildRules = (
 			);
@@ -125,29 +123,11 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A0000010000000000000002 /* TornPaperEdge_PiPL.r in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
-
-/* Begin PBXShellScriptBuildPhase section */
-		1A0000070000000000000005 /* Compile PiPL Resource */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-				"$(SRCROOT)/src/TornPaperEdge_PiPL.r",
-			);
-			name = "Compile PiPL Resource";
-			outputPaths = (
-				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/TornPaperEdge.rsrc",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/bash;
-			shellScript = "/usr/bin/Rez \"$SRCROOT/src/TornPaperEdge_PiPL.r\" -o \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/TornPaperEdge.rsrc\" -useDF -d AE_OS_MAC -i \"$SRCROOT/include\" -i \"/Users/evanmanning/Downloads/AfterEffectsSDK_25.6_61_mac/ae25.6_61.64bit.AfterEffectsSDK/Examples/Headers\" -i \"/Users/evanmanning/Downloads/AfterEffectsSDK_25.6_61_mac/ae25.6_61.64bit.AfterEffectsSDK/Examples/Resources\"\n";
-		};
-/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		1A0000070000000000000001 /* Sources */ = {
@@ -161,19 +141,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
-
-/* Begin PBXCopyFilesBuildPhase section */
-		1A0000070000000000000003 /* Copy Bundle */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (
-			);
-			name = "Copy Bundle";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXCopyFilesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
 		1A000A010000000000000001 /* Debug */ = {
@@ -208,12 +175,14 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"DEBUG=1",
 				);
+				GCC_SYMBOLS_PRIVATE_EXTERN = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
 				GCC_WARN_UNDECLARED_SELECTOR = YES;
@@ -224,7 +193,9 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = NO;
+				REZ_PREPROCESSOR_DEFINITIONS = __MACH__;
 				SDKROOT = macosx;
+				WRAPPER_EXTENSION = plugin;
 			};
 			name = Debug;
 		};
@@ -260,11 +231,13 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_OPTIMIZATION_LEVEL = 3;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"NDEBUG=1",
 				);
+				GCC_SYMBOLS_PRIVATE_EXTERN = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
 				GCC_WARN_UNDECLARED_SELECTOR = YES;
@@ -275,7 +248,9 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = NO;
+				REZ_PREPROCESSOR_DEFINITIONS = __MACH__;
 				SDKROOT = macosx;
+				WRAPPER_EXTENSION = plugin;
 			};
 			name = Release;
 		};
@@ -288,7 +263,6 @@
 				DEAD_CODE_STRIPPING = NO;
 				EXECUTABLE_NAME = TornPaper;
 				EXECUTABLE_PREFIX = "";
-				EXPORTED_SYMBOLS_FILE = "$(SRCROOT)/src/TornPaper.exports";
 				GENERATE_INFOPLIST_FILE = NO;
 				GENERATE_PKGINFO_FILE = YES;
 				HEADER_SEARCH_PATHS = (
@@ -309,10 +283,11 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REZ_SEARCH_PATHS = (
 					"$(inherited)",
+					"$(SRCROOT)/include",
+					"/Users/evanmanning/Downloads/AfterEffectsSDK_25.6_61_mac/ae25.6_61.64bit.AfterEffectsSDK/Examples/Headers",
 					"/Users/evanmanning/Downloads/AfterEffectsSDK_25.6_61_mac/ae25.6_61.64bit.AfterEffectsSDK/Examples/Resources",
 				);
 				SKIP_INSTALL = NO;
-				WRAPPER_EXTENSION = plugin;
 			};
 			name = Debug;
 		};
@@ -325,7 +300,6 @@
 				DEAD_CODE_STRIPPING = NO;
 				EXECUTABLE_NAME = TornPaper;
 				EXECUTABLE_PREFIX = "";
-				EXPORTED_SYMBOLS_FILE = "$(SRCROOT)/src/TornPaper.exports";
 				GENERATE_INFOPLIST_FILE = NO;
 				GENERATE_PKGINFO_FILE = YES;
 				HEADER_SEARCH_PATHS = (
@@ -346,10 +320,11 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REZ_SEARCH_PATHS = (
 					"$(inherited)",
+					"$(SRCROOT)/include",
+					"/Users/evanmanning/Downloads/AfterEffectsSDK_25.6_61_mac/ae25.6_61.64bit.AfterEffectsSDK/Examples/Headers",
 					"/Users/evanmanning/Downloads/AfterEffectsSDK_25.6_61_mac/ae25.6_61.64bit.AfterEffectsSDK/Examples/Resources",
 				);
 				SKIP_INSTALL = NO;
-				WRAPPER_EXTENSION = plugin;
 			};
 			name = Release;
 		};
