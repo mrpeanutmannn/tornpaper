@@ -46,6 +46,29 @@ inline double smoothstep(double edge0, double edge1, double x) {
     }
 #endif
 
+extern "C" DllExport
+PF_Err PluginDataEntryFunction2(
+    PF_PluginDataPtr    inPtr,
+    PF_PluginDataCB2    inPluginDataCallBackPtr,
+    SPBasicSuite*       inSPBasicSuitePtr,
+    const char*         inHostName,
+    const char*         inHostVersion)
+{
+    PF_Err result = PF_Err_INVALID_CALLBACK;
+
+    result = PF_REGISTER_EFFECT_EXT2(
+        inPtr,
+        inPluginDataCallBackPtr,
+        NAME,               // "Torn Paper"
+        MATCH_NAME,         // "TORN_PAPER"
+        CATEGORY,           // "Stylize"
+        AE_RESERVED_INFO,
+        "EffectMain",
+        "");
+
+    return result;
+}
+
 PF_Err EffectMain(
     PF_Cmd          cmd,
     PF_InData       *in_data,
