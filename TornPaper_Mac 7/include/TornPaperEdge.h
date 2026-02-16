@@ -1,5 +1,5 @@
 /*
-    TornPaperEdge.h - Version 18
+    TornPaperEdge.h - Version 19
     
     Realistic torn paper with fold marks
     SmartRender implementation
@@ -68,6 +68,7 @@ enum {
     PARAM_INNER_ROUGH_SCALE,
     PARAM_INNER_JAGGEDNESS,
     PARAM_INNER_NOTCH,
+    PARAM_INNER_EXPANSION,
     PARAM_TOPIC_INNER_END,
     
     // Middle Edge 1

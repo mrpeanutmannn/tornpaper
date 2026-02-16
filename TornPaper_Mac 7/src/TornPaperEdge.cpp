@@ -1,6 +1,6 @@
 /*
-    TornPaperEdge.cpp - Version 18
-    
+    TornPaperEdge.cpp - Version 19
+
     Realistic torn paper with fold marks that crack through the photo
     SmartRender implementation for multi-frame rendering
     - Edge Settings nested dropdown
@@ -8,6 +8,7 @@
     - Fold Advanced Settings nested
     - Removed fiber color var, side softness controls
     - Added dirt/smudge seed controls, crack angle controls
+    - v19: Fixed preview resolution scaling (downsample factor)
 */
 
 #define NOMINMAX
@@ -174,7 +175,7 @@ PF_Err ParamsSetup(
         PF_Precision_TENTHS, 0, 0, PARAM_MASTER_SCALE);
     
     AEFX_CLR_STRUCT(def);
-    PF_ADD_FLOAT_SLIDERX("Gap Width", 0.0, 500.0, 0.0, 300.0, 35.0,
+    PF_ADD_FLOAT_SLIDERX("Gap Width", -200.0, 500.0, -200.0, 300.0, -50.0,
         PF_Precision_TENTHS, 0, 0, PARAM_GAP_WIDTH);
     
     AEFX_CLR_STRUCT(def);
@@ -236,7 +237,11 @@ PF_Err ParamsSetup(
     AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Inner Notch Depth", 0.0, 50.0, 0.0, 50.0, 2.0,
         PF_Precision_TENTHS, 0, 0, PARAM_INNER_NOTCH);
-    
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Inner Edge Expansion", 1.0, 500.0, 1.0, 500.0, 150.0,
+        PF_Precision_TENTHS, 0, 0, PARAM_INNER_EXPANSION);
+
     AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(PARAM_TOPIC_INNER_END);
     
@@ -483,7 +488,7 @@ PF_Err ParamsSetup(
     
     // Shadow A controls (side A - typically highlight/white)
     AEFX_CLR_STRUCT(def);
-    PF_ADD_FLOAT_SLIDERX("Shadow A Opacity", 0.0, 100.0, 0.0, 100.0, 25.0,
+    PF_ADD_FLOAT_SLIDERX("Shadow A Opacity", 0.0, 100.0, 0.0, 100.0, 10.0,
         PF_Precision_TENTHS, 0, 0, PARAM_FOLD_SHADOW_A_OPACITY);
     
     AEFX_CLR_STRUCT(def);
@@ -494,13 +499,13 @@ PF_Err ParamsSetup(
     PF_ADD_FLOAT_SLIDERX("Shadow A Variability", 0.0, 100.0, 0.0, 100.0, 50.0,
         PF_Precision_TENTHS, 0, 0, PARAM_FOLD_SHADOW_A_VARIABILITY);
     
-    // Shadow A Color - white (highlight)
+    // Shadow A Color - black
     AEFX_CLR_STRUCT(def);
-    PF_ADD_COLOR("Shadow A Color", 255, 255, 255, PARAM_FOLD_SHADOW_A_COLOR);
+    PF_ADD_COLOR("Shadow A Color", 0, 0, 0, PARAM_FOLD_SHADOW_A_COLOR);
     
     // Shadow B controls (side B - typically shadow/black)
     AEFX_CLR_STRUCT(def);
-    PF_ADD_FLOAT_SLIDERX("Shadow B Opacity", 0.0, 100.0, 0.0, 100.0, 25.0,
+    PF_ADD_FLOAT_SLIDERX("Shadow B Opacity", 0.0, 100.0, 0.0, 100.0, 10.0,
         PF_Precision_TENTHS, 0, 0, PARAM_FOLD_SHADOW_B_OPACITY);
     
     AEFX_CLR_STRUCT(def);
@@ -535,7 +540,7 @@ PF_Err ParamsSetup(
         PF_Precision_TENTHS, 0, 0, PARAM_DIRT_SIZE);
     
     AEFX_CLR_STRUCT(def);
-    PF_ADD_FLOAT_SLIDERX("Dirt Opacity", 0.0, 100.0, 0.0, 100.0, 70.0,
+    PF_ADD_FLOAT_SLIDERX("Dirt Opacity", 0.0, 100.0, 0.0, 100.0, 40.0,
         PF_Precision_TENTHS, 0, 0, PARAM_DIRT_OPACITY);
     
     AEFX_CLR_STRUCT(def);
@@ -554,7 +559,7 @@ PF_Err ParamsSetup(
         PF_Precision_TENTHS, 0, 0, PARAM_SMUDGE_SIZE);
     
     AEFX_CLR_STRUCT(def);
-    PF_ADD_FLOAT_SLIDERX("Smudge Opacity", 0.0, 100.0, 0.0, 100.0, 50.0,
+    PF_ADD_FLOAT_SLIDERX("Smudge Opacity", 0.0, 100.0, 0.0, 100.0, 20.0,
         PF_Precision_TENTHS, 0, 0, PARAM_SMUDGE_OPACITY);
     
     AEFX_CLR_STRUCT(def);
@@ -1460,9 +1465,15 @@ PF_Err Render(
     PF_LayerDef     *output)
 {
     PF_Err err = PF_Err_NONE;
-    
-    // Basic settings
+
+    // Calculate downsample factor for preview resolution scaling
+    double downsampleX = (double)in_data->downsample_x.num / (double)in_data->downsample_x.den;
+    double downsampleY = (double)in_data->downsample_y.num / (double)in_data->downsample_y.den;
+    double downsampleFactor = (downsampleX + downsampleY) * 0.5;
+
+    // Basic settings - DON'T scale masterScale, work in full-res space
     double masterScale = params[PARAM_MASTER_SCALE]->u.fs_d.value / 100.0;
+
     double gapWidth = params[PARAM_GAP_WIDTH]->u.fs_d.value * masterScale;
     int seed = params[PARAM_RANDOM_SEED]->u.sd.value;
     double edgeSoftness = params[PARAM_EDGE_SOFTNESS]->u.fs_d.value * masterScale;
@@ -1478,7 +1489,8 @@ PF_Err Render(
     double innerRoughScale = params[PARAM_INNER_ROUGH_SCALE]->u.fs_d.value;
     double innerJaggedness = params[PARAM_INNER_JAGGEDNESS]->u.fs_d.value;
     double innerNotch = params[PARAM_INNER_NOTCH]->u.fs_d.value;
-    
+    double innerExpansion = params[PARAM_INNER_EXPANSION]->u.fs_d.value;
+
     // Middle edges
     double middle1Amount = params[PARAM_MIDDLE1_AMOUNT]->u.fs_d.value / 100.0;
     double middle1Position = params[PARAM_MIDDLE1_POSITION]->u.fs_d.value / 100.0;
@@ -1590,7 +1602,7 @@ PF_Err Render(
     int width = output->width;
     int height = output->height;
     
-    // Convert fold points from fixed point to pixels
+    // Convert fold points from fixed point to pixels, scaled by downsample factor
     // Fixed point format: upper 16 bits = integer, lower 16 bits = fraction
     double fp1x = (double)fold1X / 65536.0;
     double fp1y = (double)fold1Y / 65536.0;
@@ -1609,47 +1621,57 @@ PF_Err Render(
         for (int x = 0; x < width; x++) {
             double px = (double)x;
             double py = (double)y;
-            
-            float signedDist = df.getDist(x, y);
+
+            // Scale coordinates to full-resolution space for consistent noise sampling
+            double noisePx = px / downsampleFactor;
+            double noisePy = py / downsampleFactor;
+
+            // signedDist is in canvas pixels - scale to full-res space
+            float signedDistRaw = df.getDist(x, y);
+            double signedDist = signedDistRaw / downsampleFactor;
             float gradX, gradY;
             df.getGradient(x, y, gradX, gradY);
-            
+
             // Source pixel
             double srcR = inRow[x].red / 255.0;
             double srcG = inRow[x].green / 255.0;
             double srcB = inRow[x].blue / 255.0;
             double srcA = inRow[x].alpha / 255.0;
-            
-            // Edge displacements
-            double outerDisp = calcEdgeDisplacement(px, py, seed, 
+
+            // Edge displacements - use noise coordinates
+            double outerDisp = calcEdgeDisplacement(noisePx, noisePy, seed,
                 outerRoughness, outerRoughScale, outerJaggedness, outerNotch, masterScale);
-            double innerDisp = calcEdgeDisplacement(px + 1000, py + 1000, seed + 5000,
+            double innerDispRaw = calcEdgeDisplacement(noisePx + 1000, noisePy + 1000, seed + 5000,
                 innerRoughness, innerRoughScale, innerJaggedness, innerNotch, masterScale);
-            
+            // Shift inner edge based on expansion control
+            double expansionFactor = (100.0 - innerExpansion) / 50.0;
+            double innerDispMaxEstimate = (innerRoughness + innerJaggedness * 0.5 + innerNotch * 0.3) * masterScale * expansionFactor;
+            double innerDisp = innerDispRaw - innerDispMaxEstimate;
+
             double halfGap = gapWidth / 2.0;
             double outerEdge = -halfGap + outerDisp;
             double innerEdge = halfGap + innerDisp;
-            
+
             if (innerEdge < outerEdge + 2.0) {
                 double mid = (innerEdge + outerEdge) / 2.0;
                 innerEdge = mid + 1.0;
                 outerEdge = mid - 1.0;
             }
-            
+
             // Middle edges
             double middle1Edge = outerEdge;
             double middle2Edge = outerEdge;
-            
+
             if (middle1Amount > 0) {
-                double m1Disp = calcEdgeDisplacement(px + 2000, py + 2000, seed + 10000,
+                double m1Disp = calcEdgeDisplacement(noisePx + 2000, noisePy + 2000, seed + 10000,
                     middle1Roughness, 100.0, middle1Roughness * 0.2, 0, masterScale);
                 double m1Base = outerEdge + (innerEdge - outerEdge) * middle1Position;
                 middle1Edge = m1Base + m1Disp * 0.4;
                 middle1Edge = clamp(middle1Edge, outerEdge + 1.0, innerEdge - 1.0);
             }
-            
+
             if (middle2Amount > 0) {
-                double m2Disp = calcEdgeDisplacement(px + 3000, py + 3000, seed + 15000,
+                double m2Disp = calcEdgeDisplacement(noisePx + 3000, noisePy + 3000, seed + 15000,
                     middle2Roughness, 100.0, middle2Roughness * 0.2, 0, masterScale);
                 double m2Base = outerEdge + (innerEdge - outerEdge) * middle2Position;
                 middle2Edge = m2Base + m2Disp * 0.4;
@@ -2062,6 +2084,7 @@ PF_Err SmartRender(
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_INNER_ROUGH_SCALE, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_INNER_ROUGH_SCALE]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_INNER_JAGGEDNESS, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_INNER_JAGGEDNESS]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_INNER_NOTCH, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_INNER_NOTCH]));
+        ERR(PF_CHECKOUT_PARAM(in_data, PARAM_INNER_EXPANSION, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_INNER_EXPANSION]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_MIDDLE1_AMOUNT, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_MIDDLE1_AMOUNT]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_MIDDLE1_POSITION, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_MIDDLE1_POSITION]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_MIDDLE1_ROUGHNESS, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_MIDDLE1_ROUGHNESS]));
@@ -2137,8 +2160,17 @@ PF_Err SmartRender(
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_DUST_COLOR, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_DUST_COLOR]));
         
         if (!err) {
+            // Calculate downsample factor for preview resolution scaling
+            // At full res: num=1, den=1 -> factor=1.0
+            // At half res: num=1, den=2 -> factor=0.5
+            double downsampleX = (double)in_data->downsample_x.num / (double)in_data->downsample_x.den;
+            double downsampleY = (double)in_data->downsample_y.num / (double)in_data->downsample_y.den;
+            double downsampleFactor = (downsampleX + downsampleY) * 0.5;  // Average of X and Y
+
             // Extract parameter values
+            // DON'T scale masterScale - we work in full-res coordinate space
             double masterScale = params[PARAM_MASTER_SCALE].u.fs_d.value / 100.0;
+
             double gapWidth = params[PARAM_GAP_WIDTH].u.fs_d.value * masterScale;
             int seed = params[PARAM_RANDOM_SEED].u.sd.value;
             double edgeSoftness = params[PARAM_EDGE_SOFTNESS].u.fs_d.value * masterScale;
@@ -2152,7 +2184,8 @@ PF_Err SmartRender(
             double innerRoughScale = params[PARAM_INNER_ROUGH_SCALE].u.fs_d.value;
             double innerJaggedness = params[PARAM_INNER_JAGGEDNESS].u.fs_d.value;
             double innerNotch = params[PARAM_INNER_NOTCH].u.fs_d.value;
-            
+            double innerExpansion = params[PARAM_INNER_EXPANSION].u.fs_d.value;
+
             double middle1Amount = params[PARAM_MIDDLE1_AMOUNT].u.fs_d.value / 100.0;
             double middle1Position = params[PARAM_MIDDLE1_POSITION].u.fs_d.value / 100.0;
             double middle1Roughness = params[PARAM_MIDDLE1_ROUGHNESS].u.fs_d.value;
@@ -2201,6 +2234,7 @@ PF_Err SmartRender(
             A_long fold2Y = params[PARAM_FOLD_POINT2].u.td.y_value;
             double foldLineRoughness = params[PARAM_FOLD_LINE_ROUGHNESS].u.fs_d.value;
             double foldLineRoughScale = params[PARAM_FOLD_LINE_ROUGH_SCALE].u.fs_d.value;
+            // These pixel values are used in noise-coordinate space (full resolution)
             double foldLineWidth = params[PARAM_FOLD_LINE_WIDTH].u.fs_d.value;
             double foldSideAWidth = params[PARAM_FOLD_SIDE_A_WIDTH].u.fs_d.value;
             double foldSideARoughness = params[PARAM_FOLD_SIDE_A_ROUGHNESS].u.fs_d.value;
@@ -2304,19 +2338,26 @@ PF_Err SmartRender(
                 for (int x = 0; x < width; x++) {
                     double px = (double)x;
                     double py = (double)y;
-                    
+
+                    // Scale coordinates to full-resolution space for consistent noise sampling
+                    // At half res, pixel 50 should sample same noise as pixel 100 at full res
+                    double noisePx = px / downsampleFactor;
+                    double noisePy = py / downsampleFactor;
+
                     // Map output coords to input coords (handle expansion)
                     int inX = x;
                     int inY = y;
-                    
+
                     // Get distance field values (clamp to input bounds)
                     int dfX = safeMax(0, safeMin(input->width - 1, inX));
                     int dfY = safeMax(0, safeMin(input->height - 1, inY));
-                    
-                    float signedDist = df.getDist(dfX, dfY);
+
+                    // signedDist is in canvas pixels - scale to full-res space
+                    float signedDistRaw = df.getDist(dfX, dfY);
+                    double signedDist = signedDistRaw / downsampleFactor;
                     float gradX, gradY;
                     df.getGradient(dfX, dfY, gradX, gradY);
-                    
+
                     // Get source pixel (with bounds check) - normalized to 0.0-1.0
                     double srcR = 0, srcG = 0, srcB = 0, srcA = 0;
                     if (inX >= 0 && inX < input->width && inY >= 0 && inY < input->height) {
@@ -2343,47 +2384,55 @@ PF_Err SmartRender(
                             srcA = inRow[inX].alpha / 255.0;
                         }
                     }
-                    
-                    // Edge displacements
-                    double outerDisp = calcEdgeDisplacement(px, py, seed, 
+
+                    // Edge displacements - use noise coordinates for consistency
+                    // masterScale is already scaled for pixel sizes, noisePx/noisePy for noise
+                    double outerDisp = calcEdgeDisplacement(noisePx, noisePy, seed,
                         outerRoughness, outerRoughScale, outerJaggedness, outerNotch, masterScale);
-                    double innerDisp = calcEdgeDisplacement(px + 1000, py + 1000, seed + 5000,
+                    double innerDispRaw = calcEdgeDisplacement(noisePx + 1000, noisePy + 1000, seed + 5000,
                         innerRoughness, innerRoughScale, innerJaggedness, innerNotch, masterScale);
-                    
+                    // Shift inner edge based on expansion control
+                    // expansion=100: no shift (innerDisp = innerDispRaw)
+                    // expansion=50: current behavior (small shift)
+                    // expansion=1: maximum shift inward
+                    double expansionFactor = (100.0 - innerExpansion) / 50.0;  // 0 at 100, 1 at 50, ~2 at 1
+                    double innerDispMaxEstimate = (innerRoughness + innerJaggedness * 0.5 + innerNotch * 0.3) * masterScale * expansionFactor;
+                    double innerDisp = innerDispRaw - innerDispMaxEstimate;
+
                     double halfGap = gapWidth / 2.0;
                     double outerEdge = -halfGap + outerDisp;
                     double innerEdge = halfGap + innerDisp;
-                    
+
                     if (innerEdge < outerEdge + 2.0) {
                         double mid = (innerEdge + outerEdge) / 2.0;
                         innerEdge = mid + 1.0;
                         outerEdge = mid - 1.0;
                     }
-                    
+
                     // Middle edges
                     double middle1Edge = outerEdge;
                     double middle2Edge = outerEdge;
-                    
+
                     if (middle1Amount > 0) {
-                        double m1Disp = calcEdgeDisplacement(px + 2000, py + 2000, seed + 10000,
+                        double m1Disp = calcEdgeDisplacement(noisePx + 2000, noisePy + 2000, seed + 10000,
                             middle1Roughness, 100.0, middle1Roughness * 0.2, 0, masterScale);
                         double m1Base = outerEdge + (innerEdge - outerEdge) * middle1Position;
                         middle1Edge = m1Base + m1Disp * 0.4;
                         middle1Edge = clamp(middle1Edge, outerEdge + 1.0, innerEdge - 1.0);
                     }
-                    
+
                     if (middle2Amount > 0) {
-                        double m2Disp = calcEdgeDisplacement(px + 3000, py + 3000, seed + 15000,
+                        double m2Disp = calcEdgeDisplacement(noisePx + 3000, noisePy + 3000, seed + 15000,
                             middle2Roughness, 100.0, middle2Roughness * 0.2, 0, masterScale);
                         double m2Base = outerEdge + (innerEdge - outerEdge) * middle2Position;
                         middle2Edge = m2Base + m2Disp * 0.4;
                         middle2Edge = clamp(middle2Edge, outerEdge + 1.0, innerEdge - 1.0);
                     }
-                    
+
                     // Alphas
                     double softness = safeMax(0.5, edgeSoftness);
                     double contentAlpha = smoothstep(innerEdge - softness, innerEdge + softness, signedDist);
-                    
+
                     double paperAlpha = 0.0;
                     if (signedDist <= outerEdge - softness) {
                         paperAlpha = 0.0;
@@ -2396,21 +2445,21 @@ PF_Err SmartRender(
                     } else {
                         paperAlpha = 1.0 - smoothstep(innerEdge - softness, innerEdge + softness, signedDist);
                     }
-                    
-                    // Fibers
-                    FiberFieldResult outerFibers = fiberField(px, py, signedDist - outerEdge, gradX, gradY,
-                        fiberDensity, fiberLength, fiberThickness, fiberSpread, 
+
+                    // Fibers - use noise coordinates for consistency
+                    FiberFieldResult outerFibers = fiberField(noisePx, noisePy, signedDist - outerEdge, gradX, gradY,
+                        fiberDensity, fiberLength, fiberThickness, fiberSpread,
                         fiberSoftness, fiberFeather, fiberRange, seed + 1000);
-                    
-                    FiberFieldResult innerFibers = fiberField(px, py, signedDist - innerEdge, -gradX, -gradY,
+
+                    FiberFieldResult innerFibers = fiberField(noisePx, noisePy, signedDist - innerEdge, -gradX, -gradY,
                         fiberDensity * 0.7, fiberLength * 0.8, fiberThickness, fiberSpread,
                         fiberSoftness, fiberFeather, fiberRange, seed + 2000);
-                    
+
                     FiberFieldResult middle1Fibers = {0, 0, 0.5, 0};
                     FiberFieldResult middle2Fibers = {0, 0, 0.5, 0};
-                    
+
                     if (middle1Amount > 0 && middle1FiberDensity > 0) {
-                        middle1Fibers = fiberField(px, py, signedDist - middle1Edge, -gradX, -gradY,
+                        middle1Fibers = fiberField(noisePx, noisePy, signedDist - middle1Edge, -gradX, -gradY,
                             middle1FiberDensity, fiberLength * 0.6, fiberThickness, fiberSpread,
                             fiberSoftness, fiberFeather, fiberRange * 0.5, seed + 3000);
                         middle1Fibers.opacity *= middle1Amount;
@@ -2418,7 +2467,7 @@ PF_Err SmartRender(
                     }
                     
                     if (middle2Amount > 0 && middle2FiberDensity > 0) {
-                        middle2Fibers = fiberField(px, py, signedDist - middle2Edge, -gradX, -gradY,
+                        middle2Fibers = fiberField(noisePx, noisePy, signedDist - middle2Edge, -gradX, -gradY,
                             middle2FiberDensity, fiberLength * 0.6, fiberThickness, fiberSpread,
                             fiberSoftness, fiberFeather, fiberRange * 0.5, seed + 4000);
                         middle2Fibers.opacity *= middle2Amount;
@@ -2452,19 +2501,19 @@ PF_Err SmartRender(
                     double backingB = paperBaseB;
                     
                     if (paperTexture > 0) {
-                        double texScale = 3.0 * masterScale;
-                        double grain1 = fbm2D(px / texScale, py / texScale, seed + 7000, 3, 0.5);
-                        double grain2 = valueNoise2D(px / (texScale * 0.5), py / (texScale * 0.5), seed + 8000);
-                        double streaks = fbm2D(px / (texScale * 0.67), py / (texScale * 5.0), seed + 9000, 2, 0.6);
-                        
+                        double texScale = 3.0 * masterScale / downsampleFactor;
+                        double grain1 = fbm2D(noisePx / texScale, noisePy / texScale, seed + 7000, 3, 0.5);
+                        double grain2 = valueNoise2D(noisePx / (texScale * 0.5), noisePy / (texScale * 0.5), seed + 8000);
+                        double streaks = fbm2D(noisePx / (texScale * 0.67), noisePy / (texScale * 5.0), seed + 9000, 2, 0.6);
+
                         double tex = grain1 * 0.5 + grain2 * 0.3 + streaks * 0.2;
                         tex = (tex - 0.5) * paperTexture * 0.15;
-                        
+
                         backingR = clamp01(backingR + tex);
                         backingG = clamp01(backingG + tex);
                         backingB = clamp01(backingB + tex * 0.9);
                     }
-                    
+
                     // Paper color (simplified for SmartRender - full version in Render())
                     double paperR = paperBaseR, paperG = paperBaseG, paperB = paperBaseB;
                     
@@ -2489,20 +2538,20 @@ PF_Err SmartRender(
                         }
                         
                         if (paperTexture > 0) {
-                            double texScale = 3.0 * masterScale;
-                            double grain1 = fbm2D(px / texScale, py / texScale, seed + 7000, 3, 0.5);
-                            double grain2 = valueNoise2D(px / (texScale * 0.5), py / (texScale * 0.5), seed + 8000);
-                            double streaks = fbm2D(px / (texScale * 0.67), py / (texScale * 5.0), seed + 9000, 2, 0.6);
-                            
+                            double texScale = 3.0 * masterScale / downsampleFactor;
+                            double grain1 = fbm2D(noisePx / texScale, noisePy / texScale, seed + 7000, 3, 0.5);
+                            double grain2 = valueNoise2D(noisePx / (texScale * 0.5), noisePy / (texScale * 0.5), seed + 8000);
+                            double streaks = fbm2D(noisePx / (texScale * 0.67), noisePy / (texScale * 5.0), seed + 9000, 2, 0.6);
+
                             double tex = grain1 * 0.5 + grain2 * 0.3 + streaks * 0.2;
                             tex = (tex - 0.5) * paperTexture * 0.15;
-                            
+
                             paperR = clamp01(paperR + tex);
                             paperG = clamp01(paperG + tex);
                             paperB = clamp01(paperB + tex * 0.9);
                         }
                     }
-                    
+
                     // Composite
                     double finalR, finalG, finalB, finalA;
                     
@@ -2519,10 +2568,13 @@ PF_Err SmartRender(
                             finalA = 1.0;
                         }
                         
-                        // Apply fold mark
+                        // Apply fold mark - use noise coordinates
                         if (foldAmount > 0) {
                             double crackStrength, foldShadowAStr, foldShadowBStr;
-                            foldCrease(px, py, seed + 50000, fp1x, fp1y, fp2x, fp2y,
+                            // fp1/fp2 are in full-res space, so divide by downsampleFactor to match noisePx/noisePy
+                            foldCrease(noisePx, noisePy, seed + 50000,
+                                fp1x / downsampleFactor, fp1y / downsampleFactor,
+                                fp2x / downsampleFactor, fp2y / downsampleFactor,
                                 foldLineRoughness, foldLineRoughScale, foldLineWidth,
                                 foldSideAWidth, foldSideARoughness, foldSideARoughScale, foldSideAJagged, foldSideASoftness,
                                 foldSideBWidth, foldSideBRoughness, foldSideBRoughScale, foldSideBJagged, foldSideBSoftness,
@@ -2566,23 +2618,23 @@ PF_Err SmartRender(
                         
                         // Apply grunge
                         if (dirtAmount > 0) {
-                            double dirt = organicDirt(px, py, dirtSeed, dirtSize, dirtAmount, masterScale);
+                            double dirt = organicDirt(noisePx, noisePy, dirtSeed, dirtSize, dirtAmount, masterScale);
                             double dirtStr = dirt * dirtOpacity;
                             finalR = finalR * (1.0 - dirtStr) + dirtR * dirtStr;
                             finalG = finalG * (1.0 - dirtStr) + dirtG * dirtStr;
                             finalB = finalB * (1.0 - dirtStr) + dirtB * dirtStr;
                         }
-                        
+
                         if (smudgeAmount > 0) {
-                            double smudge = organicSmudge(px, py, smudgeSeed, smudgeSize, smudgeAmount, masterScale);
+                            double smudge = organicSmudge(noisePx, noisePy, smudgeSeed, smudgeSize, smudgeAmount, masterScale);
                             double smudgeStr = smudge * smudgeOpacity;
                             finalR = finalR * (1.0 - smudgeStr) + smudgeR * smudgeStr;
                             finalG = finalG * (1.0 - smudgeStr) + smudgeG * smudgeStr;
                             finalB = finalB * (1.0 - smudgeStr) + smudgeB * smudgeStr;
                         }
-                        
+
                         if (dustAmount > 0) {
-                            double dust = dustParticles(px, py, dustSeed, dustSize, dustAmount, masterScale);
+                            double dust = dustParticles(noisePx, noisePy, dustSeed, dustSize, dustAmount, masterScale);
                             if (dust > 0) {
                                 finalR = finalR * (1.0 - dust) + dustR * dust;
                                 finalG = finalG * (1.0 - dust) + dustG * dust;
@@ -2648,6 +2700,7 @@ PF_Err SmartRender(
         PF_CHECKIN_PARAM(in_data, &params[PARAM_INNER_ROUGH_SCALE]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_INNER_JAGGEDNESS]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_INNER_NOTCH]);
+        PF_CHECKIN_PARAM(in_data, &params[PARAM_INNER_EXPANSION]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_MIDDLE1_AMOUNT]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_MIDDLE1_POSITION]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_MIDDLE1_ROUGHNESS]);
