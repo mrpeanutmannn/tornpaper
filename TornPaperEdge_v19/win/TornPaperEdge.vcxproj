@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>16.0</VCProjectVersion>
+    <ProjectGuid>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</ProjectGuid>
+    <RootNamespace>TornPaperEdge</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  
+  <PropertyGroup Label="UserMacros">
+    <AE_SDK>C:\Users\evanm\Downloads\AfterEffectsSDK_25.6_61_win\AfterEffectsSDK_25.6_61_win\ae25.6_61.64bit.AfterEffectsSDK\Examples</AE_SDK>
+  </PropertyGroup>
+  
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LinkIncremental>true</LinkIncremental>
+    <OutDir>$(ProjectDir)..\build\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)..\build\$(Configuration)\intermediate\</IntDir>
+    <TargetName>TornPaperEdge</TargetName>
+    <TargetExt>.aex</TargetExt>
+  </PropertyGroup>
+  
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <LinkIncremental>false</LinkIncremental>
+    <OutDir>$(ProjectDir)..\build\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)..\build\$(Configuration)\intermediate\</IntDir>
+    <TargetName>TornPaperEdge</TargetName>
+    <TargetExt>.aex</TargetExt>
+  </PropertyGroup>
+  
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_WINDOWS;_USRDLL;AE_OS_WIN;WIN32;_CRT_SECURE_NO_WARNINGS;MSWindows;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>$(AE_SDK)\Headers;$(AE_SDK)\Headers\SP;$(AE_SDK)\Util;$(AE_SDK)\Resources;$(ProjectDir)..\include;$(ProjectDir)..\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(AE_SDK)\Libraries\Win64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+    </Link>
+    <ResourceCompile>
+      <PreprocessorDefinitions>_DEBUG;AE_OS_WIN;MSWindows;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(AE_SDK)\Headers;$(AE_SDK)\Resources;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+  </ItemDefinitionGroup>
+  
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;_USRDLL;AE_OS_WIN;WIN32;_CRT_SECURE_NO_WARNINGS;MSWindows;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>$(AE_SDK)\Headers;$(AE_SDK)\Headers\SP;$(AE_SDK)\Util;$(AE_SDK)\Resources;$(ProjectDir)..\include;$(ProjectDir)..\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <Optimization>MaxSpeed</Optimization>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(AE_SDK)\Libraries\Win64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+    </Link>
+    <ResourceCompile>
+      <PreprocessorDefinitions>NDEBUG;AE_OS_WIN;MSWindows;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(AE_SDK)\Headers;$(AE_SDK)\Resources;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+  </ItemDefinitionGroup>
+  
+  <ItemGroup>
+    <ClInclude Include="..\include\TornPaperEdge.h" />
+    <ClInclude Include="..\include\NoiseUtils.h" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <ClCompile Include="..\src\TornPaperEdge.cpp" />
+    <ClCompile Include="$(AE_SDK)\Util\AEGP_SuiteHandler.cpp" />
+    <ClCompile Include="$(AE_SDK)\Util\MissingSuiteError.cpp" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <ResourceCompile Include="..\src\TornPaperEdge.rc" />
+  </ItemGroup>
+  
+  <!-- PiPL Custom Build -->
+  <ItemGroup>
+    <CustomBuild Include="..\src\TornPaperEdge_PiPL.r">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">if not exist "$(IntDir)" mkdir "$(IntDir)"
+"$(AE_SDK)\Resources\PiPLtool.exe" "%(FullPath)" "$(IntDir)%(Filename).rr"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">if not exist "$(IntDir)" mkdir "$(IntDir)"
+"$(AE_SDK)\Resources\PiPLtool.exe" "%(FullPath)" "$(IntDir)%(Filename).rr"</Command>
+      <Outputs>$(IntDir)%(Filename).rr</Outputs>
+    </CustomBuild>
+  </ItemGroup>
+  
+  <!-- Compile the .rr to .res using a second custom build -->
+  <Target Name="CompilePiPL" AfterTargets="CustomBuild" BeforeTargets="ResourceCompile">
+    <Exec Command="cl /EP /D MSWindows /D AE_OS_WIN /I &quot;$(AE_SDK)\Headers&quot; /I &quot;$(AE_SDK)\Resources&quot; &quot;$(IntDir)TornPaperEdge_PiPL.rr&quot; &gt; &quot;$(IntDir)TornPaperEdge_PiPL.rrc&quot;" />
+    <Exec Command="rc /fo &quot;$(IntDir)TornPaperEdge_PiPL.res&quot; &quot;$(IntDir)TornPaperEdge_PiPL.rrc&quot;" />
+  </Target>
+  
+  <Target Name="LinkPiPL" AfterTargets="CompilePiPL" BeforeTargets="Link">
+    <ItemGroup>
+      <Link Include="$(IntDir)TornPaperEdge_PiPL.res" />
+    </ItemGroup>
+  </Target>
+  
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>
