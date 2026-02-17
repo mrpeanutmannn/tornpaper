@@ -1744,28 +1744,29 @@ PF_Err Render(
             
             double totalPaperAlpha = safeMax(paperAlpha, fiberAlpha);
             
-            // Paper backing color with texture
-            double backingR = paperBaseR;
-            double backingG = paperBaseG;
-            double backingB = paperBaseB;
-            
+            // Compute paper texture once and reuse for both backing and paper color
+            double paperTex = 0.0;
+            double paperTexBlue = 0.0;
             if (paperTexture > 0) {
                 double texScale = 3.0 * masterScale;
                 double grain1 = fbm2D(px / texScale, py / texScale, seed + 7000, 3, 0.5);
                 double grain2 = valueNoise2D(px / (texScale * 0.5), py / (texScale * 0.5), seed + 8000);
                 double streaks = fbm2D(px / (texScale * 0.67), py / (texScale * 5.0), seed + 9000, 2, 0.6);
-                
+
                 double tex = grain1 * 0.5 + grain2 * 0.3 + streaks * 0.2;
                 tex = (tex - 0.5) * paperTexture * 0.15;
-                
-                backingR = clamp01(backingR + tex);
-                backingG = clamp01(backingG + tex);
-                backingB = clamp01(backingB + tex * 0.9);
+                paperTex = tex;
+                paperTexBlue = tex * 0.9;
             }
-            
+
+            // Paper backing color with texture
+            double backingR = clamp01(paperBaseR + paperTex);
+            double backingG = clamp01(paperBaseG + paperTex);
+            double backingB = clamp01(paperBaseB + paperTexBlue);
+
             // Paper color
             double paperR = paperBaseR, paperG = paperBaseG, paperB = paperBaseB;
-            
+
             if (totalPaperAlpha > 0.01) {
                 if (fiberShadow > 0 && fiberShadowAlpha > 0.01) {
                     double shadowStr = fiberShadowAlpha * fiberShadow * 0.4;
@@ -1773,31 +1774,23 @@ PF_Err Render(
                     paperG *= (1.0 - shadowStr);
                     paperB *= (1.0 - shadowStr * 0.8);
                 }
-                
+
                 if (fiberAlpha > 0.05) {
                     double colorShift = (fiberColorVariation - 0.5) * fiberColorVar * 0.25;
                     double fR = fiberBaseR * (1.0 + colorShift * 0.3);
                     double fG = fiberBaseG * (1.0 + colorShift * 0.2);
                     double fB = fiberBaseB * (1.0 + colorShift * 0.1);
-                    
+
                     double fiberBlend = fiberAlpha * 0.6;
                     paperR = paperR * (1.0 - fiberBlend) + clamp01(fR) * fiberBlend;
                     paperG = paperG * (1.0 - fiberBlend) + clamp01(fG) * fiberBlend;
                     paperB = paperB * (1.0 - fiberBlend) + clamp01(fB) * fiberBlend;
                 }
-                
+
                 if (paperTexture > 0) {
-                    double texScale = 3.0 * masterScale;
-                    double grain1 = fbm2D(px / texScale, py / texScale, seed + 7000, 3, 0.5);
-                    double grain2 = valueNoise2D(px / (texScale * 0.5), py / (texScale * 0.5), seed + 8000);
-                    double streaks = fbm2D(px / (texScale * 0.67), py / (texScale * 5.0), seed + 9000, 2, 0.6);
-                    
-                    double tex = grain1 * 0.5 + grain2 * 0.3 + streaks * 0.2;
-                    tex = (tex - 0.5) * paperTexture * 0.15;
-                    
-                    paperR = clamp01(paperR + tex);
-                    paperG = clamp01(paperG + tex);
-                    paperB = clamp01(paperB + tex * 0.9);
+                    paperR = clamp01(paperR + paperTex);
+                    paperG = clamp01(paperG + paperTex);
+                    paperB = clamp01(paperB + paperTexBlue);
                 }
                 
                 // Middle shadows
@@ -2495,11 +2488,9 @@ PF_Err SmartRender(
                     
                     double totalPaperAlpha = safeMax(paperAlpha, fiberAlpha);
                     
-                    // Paper backing color with texture
-                    double backingR = paperBaseR;
-                    double backingG = paperBaseG;
-                    double backingB = paperBaseB;
-                    
+                    // Compute paper texture once and reuse for both backing and paper color
+                    double paperTex = 0.0;
+                    double paperTexBlue = 0.0;
                     if (paperTexture > 0) {
                         double texScale = 3.0 * masterScale / downsampleFactor;
                         double grain1 = fbm2D(noisePx / texScale, noisePy / texScale, seed + 7000, 3, 0.5);
@@ -2508,15 +2499,18 @@ PF_Err SmartRender(
 
                         double tex = grain1 * 0.5 + grain2 * 0.3 + streaks * 0.2;
                         tex = (tex - 0.5) * paperTexture * 0.15;
-
-                        backingR = clamp01(backingR + tex);
-                        backingG = clamp01(backingG + tex);
-                        backingB = clamp01(backingB + tex * 0.9);
+                        paperTex = tex;
+                        paperTexBlue = tex * 0.9;
                     }
 
-                    // Paper color (simplified for SmartRender - full version in Render())
+                    // Paper backing color with texture
+                    double backingR = clamp01(paperBaseR + paperTex);
+                    double backingG = clamp01(paperBaseG + paperTex);
+                    double backingB = clamp01(paperBaseB + paperTexBlue);
+
+                    // Paper color
                     double paperR = paperBaseR, paperG = paperBaseG, paperB = paperBaseB;
-                    
+
                     if (totalPaperAlpha > 0.01) {
                         if (fiberShadow > 0 && fiberShadowAlpha > 0.01) {
                             double shadowStr = fiberShadowAlpha * fiberShadow * 0.4;
@@ -2524,31 +2518,23 @@ PF_Err SmartRender(
                             paperG *= (1.0 - shadowStr);
                             paperB *= (1.0 - shadowStr * 0.8);
                         }
-                        
+
                         if (fiberAlpha > 0.05) {
                             double colorShift = (fiberColorVariation - 0.5) * fiberColorVar * 0.25;
                             double fR = fiberBaseR * (1.0 + colorShift * 0.3);
                             double fG = fiberBaseG * (1.0 + colorShift * 0.2);
                             double fB = fiberBaseB * (1.0 + colorShift * 0.1);
-                            
+
                             double fiberBlend = fiberAlpha * 0.6;
                             paperR = paperR * (1.0 - fiberBlend) + clamp01(fR) * fiberBlend;
                             paperG = paperG * (1.0 - fiberBlend) + clamp01(fG) * fiberBlend;
                             paperB = paperB * (1.0 - fiberBlend) + clamp01(fB) * fiberBlend;
                         }
-                        
+
                         if (paperTexture > 0) {
-                            double texScale = 3.0 * masterScale / downsampleFactor;
-                            double grain1 = fbm2D(noisePx / texScale, noisePy / texScale, seed + 7000, 3, 0.5);
-                            double grain2 = valueNoise2D(noisePx / (texScale * 0.5), noisePy / (texScale * 0.5), seed + 8000);
-                            double streaks = fbm2D(noisePx / (texScale * 0.67), noisePy / (texScale * 5.0), seed + 9000, 2, 0.6);
-
-                            double tex = grain1 * 0.5 + grain2 * 0.3 + streaks * 0.2;
-                            tex = (tex - 0.5) * paperTexture * 0.15;
-
-                            paperR = clamp01(paperR + tex);
-                            paperG = clamp01(paperG + tex);
-                            paperB = clamp01(paperB + tex * 0.9);
+                            paperR = clamp01(paperR + paperTex);
+                            paperG = clamp01(paperG + paperTex);
+                            paperB = clamp01(paperB + paperTexBlue);
                         }
                     }
 
