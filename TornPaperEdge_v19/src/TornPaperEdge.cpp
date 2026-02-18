@@ -2560,6 +2560,61 @@ PF_Err SmartRender(
                             paperG = clamp01(paperG + paperTex);
                             paperB = clamp01(paperB + paperTexBlue);
                         }
+
+                        // Middle shadows
+                        if (middle1Amount > 0 && middle1Shadow > 0) {
+                            double distFromMiddle1 = middle1Edge - signedDist;
+                            double m1ShadowWidth = shadowWidth * 0.4;
+                            if (distFromMiddle1 > 0 && distFromMiddle1 < m1ShadowWidth) {
+                                double shadowFactor = 1.0 - (distFromMiddle1 / m1ShadowWidth);
+                                shadowFactor = shadowFactor * shadowFactor;
+                                double shadow = shadowFactor * middle1Shadow * middle1Amount * 0.35;
+                                paperR *= (1.0 - shadow);
+                                paperG *= (1.0 - shadow);
+                                paperB *= (1.0 - shadow * 0.8);
+                            }
+                        }
+
+                        if (middle2Amount > 0 && middle2Shadow > 0) {
+                            double distFromMiddle2 = middle2Edge - signedDist;
+                            double m2ShadowWidth = shadowWidth * 0.4;
+                            if (distFromMiddle2 > 0 && distFromMiddle2 < m2ShadowWidth) {
+                                double shadowFactor = 1.0 - (distFromMiddle2 / m2ShadowWidth);
+                                shadowFactor = shadowFactor * shadowFactor;
+                                double shadow = shadowFactor * middle2Shadow * middle2Amount * 0.35;
+                                paperR *= (1.0 - shadow);
+                                paperG *= (1.0 - shadow);
+                                paperB *= (1.0 - shadow * 0.8);
+                            }
+                        }
+
+                        // Outer shadow
+                        if (shadowAmount > 0) {
+                            double fiberExtent = outerFibers.maxExtent;
+                            double shadowStart = outerEdge + fiberExtent;
+                            double distFromShadowStart = signedDist - shadowStart;
+                            if (distFromShadowStart > 0 && distFromShadowStart < shadowWidth) {
+                                double shadowFactor = 1.0 - (distFromShadowStart / shadowWidth);
+                                shadowFactor = shadowFactor * shadowFactor;
+                                double shadow = shadowFactor * shadowAmount * 0.4;
+                                paperR *= (1.0 - shadow);
+                                paperG *= (1.0 - shadow);
+                                paperB *= (1.0 - shadow * 0.8);
+                            }
+                        }
+
+                        // Inner shadow
+                        if (innerShadowAmount > 0) {
+                            double distFromInner = innerEdge - signedDist;
+                            if (distFromInner > 0 && distFromInner < innerShadowWidth) {
+                                double shadowFactor = 1.0 - (distFromInner / innerShadowWidth);
+                                shadowFactor = shadowFactor * shadowFactor;
+                                double shadow = shadowFactor * innerShadowAmount * 0.5;
+                                paperR *= (1.0 - shadow);
+                                paperG *= (1.0 - shadow);
+                                paperB *= (1.0 - shadow * 0.8);
+                            }
+                        }
                     }
                     
                     // Composite
