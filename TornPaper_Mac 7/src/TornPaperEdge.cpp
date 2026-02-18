@@ -724,19 +724,20 @@ public:
 inline double worleyNoise(double x, double y, int seed) {
     int xi = (int)floor(x);
     int yi = (int)floor(y);
-    double minDist = 1e10;
-    
+    double minDist2 = 1e20;
+
     for (int dy = -1; dy <= 1; dy++) {
         for (int dx = -1; dx <= 1; dx++) {
             int cx = xi + dx;
             int cy = yi + dy;
             double px = cx + (double)(hash2D(cx, cy, seed) & 0xFFFF) / 65536.0;
             double py = cy + (double)(hash2D(cx, cy, seed + 1000) & 0xFFFF) / 65536.0;
-            double dist = sqrt((x - px) * (x - px) + (y - py) * (y - py));
-            if (dist < minDist) minDist = dist;
+            double ddx = x - px, ddy = y - py;
+            double dist2 = ddx * ddx + ddy * ddy;
+            if (dist2 < minDist2) minDist2 = dist2;
         }
     }
-    return minDist;
+    return sqrt(minDist2);
 }
 
 inline double ridgedMultifractal(double x, double y, int seed, int octaves) {
@@ -1403,14 +1404,19 @@ inline FiberFieldResult fiberField(
     if (fabs(edgeDist) > maxFiberDist * 2.5) return result;
     
     double cellSize = 4.0 / (density / 50.0 + 0.5);
-    
+
     int cellX = (int)floor(px / cellSize);
     int cellY = (int)floor(py / cellSize);
-    
+
+    // Scale search radius to match fiber reach instead of fixed 9x9
+    int searchRadius = (int)ceil(maxFiberDist / cellSize) + 1;
+    if (searchRadius < 2) searchRadius = 2;
+    if (searchRadius > 8) searchRadius = 8;
+
     double maxExtent = 0;
-    
-    for (int cy = cellY - 4; cy <= cellY + 4; cy++) {
-        for (int cx = cellX - 4; cx <= cellX + 4; cx++) {
+
+    for (int cy = cellY - searchRadius; cy <= cellY + searchRadius; cy++) {
+        for (int cx = cellX - searchRadius; cx <= cellX + searchRadius; cx++) {
             uint32_t cellHash = hash2D(cx, cy, seed);
             
             double prob = (cellHash & 0xFF) / 255.0;
