@@ -1380,14 +1380,19 @@ inline FiberFieldResult fiberField(
     if (fabs(edgeDist) > maxFiberDist * 2.5) return result;
     
     double cellSize = 4.0 / (density / 50.0 + 0.5);
-    
+
     int cellX = (int)floor(px / cellSize);
     int cellY = (int)floor(py / cellSize);
-    
+
+    // Scale search radius to match fiber reach instead of fixed 9x9
+    int searchRadius = (int)ceil(maxFiberDist / cellSize) + 1;
+    if (searchRadius < 2) searchRadius = 2;
+    if (searchRadius > 8) searchRadius = 8;
+
     double maxExtent = 0;
-    
-    for (int cy = cellY - 4; cy <= cellY + 4; cy++) {
-        for (int cx = cellX - 4; cx <= cellX + 4; cx++) {
+
+    for (int cy = cellY - searchRadius; cy <= cellY + searchRadius; cy++) {
+        for (int cx = cellX - searchRadius; cx <= cellX + searchRadius; cx++) {
             uint32_t cellHash = hash2D(cx, cy, seed);
             
             double prob = (cellHash & 0xFF) / 255.0;
