@@ -19,6 +19,7 @@
 #include <cmath>
 #include <algorithm>
 #include <vector>
+#include <cstdint>
 
 #ifdef min
 #undef min
@@ -693,6 +694,44 @@ public:
         buildFromLayerGeneric(layer, 4);
     }
 };
+
+// ============================================================
+// DISTANCE FIELD CACHE
+// ============================================================
+
+// FNV-1a hash of sampled alpha values — fast change detection
+static inline uint64_t hashInputAlpha(PF_EffectWorld* layer, A_long pixelBytes) {
+    uint64_t hash = 14695981039346656037ULL;
+    int w = layer->width;
+    int h = layer->height;
+    for (int y = 0; y < h; y += 8) {
+        char* rowPtr = (char*)layer->data + y * layer->rowbytes;
+        for (int x = 0; x < w; x += 8) {
+            uint32_t alpha;
+            if (pixelBytes >= 16) {
+                alpha = (uint32_t)(((PF_PixelFloat*)rowPtr)[x].alpha * 65536.0f);
+            } else if (pixelBytes >= 8) {
+                alpha = ((PF_Pixel16*)rowPtr)[x].alpha;
+            } else {
+                alpha = ((PF_Pixel8*)rowPtr)[x].alpha;
+            }
+            hash ^= alpha;
+            hash *= 1099511628211ULL;
+        }
+    }
+    hash ^= (uint64_t)w;  hash *= 1099511628211ULL;
+    hash ^= (uint64_t)h;  hash *= 1099511628211ULL;
+    return hash;
+}
+
+struct DFCache {
+    uint64_t inputHash;
+    int width, height;
+    DistanceField df;
+    DFCache() : inputHash(0), width(0), height(0), df(0, 0) {}
+};
+
+static thread_local DFCache tl_dfCache;
 
 // ============================================================
 // NOISE FUNCTIONS
@@ -1592,10 +1631,18 @@ PF_Err Render(
     double fp2x = (double)fold2X / 65536.0;
     double fp2y = (double)fold2Y / 65536.0;
     
-    // Build distance field
-    DistanceField df(width, height);
-    df.buildFromLayer(input);
-    
+    // Build distance field (cached across frames when input unchanged)
+    uint64_t dfHash = hashInputAlpha(input, 4);
+    DFCache& cache = tl_dfCache;
+    if (cache.inputHash != dfHash || cache.width != width || cache.height != height) {
+        cache.df = DistanceField(width, height);
+        cache.df.buildFromLayer(input);
+        cache.inputHash = dfHash;
+        cache.width = width;
+        cache.height = height;
+    }
+    DistanceField& df = cache.df;
+
     // Render
     for (int y = 0; y < height; y++) {
         PF_Pixel8* inRow = (PF_Pixel8*)((char*)input->data + y * input->rowbytes);
@@ -2274,42 +2321,34 @@ PF_Err SmartRender(
             double fp2x = (double)fold2X / 65536.0;
             double fp2y = (double)fold2Y / 65536.0;
             
-            // Build distance field from input
-            // Need to handle different pixel formats for distance field too
-            DistanceField df(input->width, input->height);
-            
             // Determine bit depth properly
-            // PF_WORLD_IS_DEEP checks for 16-bit
-            // For 32-bit float, we need to check world_flags for specific flag
             bool is16bit = PF_WORLD_IS_DEEP(output) ? true : false;
             bool isFloat = false;
-            
-            // Check if 32-bit float by looking at actual bytes per pixel
-            // 8-bit: 4 bytes per pixel (but rowbytes may have padding)
-            // 16-bit: 8 bytes per pixel  
-            // 32-bit float: 16 bytes per pixel
-            // Use a more reliable check - if not 16-bit deep, check if rowbytes suggests float
             if (!is16bit) {
-                // Minimum bytes needed for the row without padding
-                A_long minRowBytes8 = output->width * 4;   // 8-bit ARGB
-                A_long minRowBytes32 = output->width * 16; // 32-bit float ARGB
-                
-                // If rowbytes is large enough for float, it's probably float
+                A_long minRowBytes32 = output->width * 16;
                 if (output->rowbytes >= minRowBytes32) {
                     isFloat = true;
                 }
             }
-            
-            // Determine pixel size for array indexing
-            int pixelSize = 4;  // Default 8-bit (4 bytes)
+            int pixelSize = 4;
             if (isFloat) {
-                pixelSize = 16;  // 32-bit float (16 bytes)
+                pixelSize = 16;
             } else if (is16bit) {
-                pixelSize = 8;   // 16-bit (8 bytes)
+                pixelSize = 8;
             }
-            
-            // Build distance field
-            df.buildFromLayerGeneric(input, pixelSize);
+
+            // Build distance field (cached across frames when input unchanged)
+            int dfW = input->width, dfH = input->height;
+            uint64_t dfHash = hashInputAlpha(input, pixelSize);
+            DFCache& cache = tl_dfCache;
+            if (cache.inputHash != dfHash || cache.width != dfW || cache.height != dfH) {
+                cache.df = DistanceField(dfW, dfH);
+                cache.df.buildFromLayerGeneric(input, pixelSize);
+                cache.inputHash = dfHash;
+                cache.width = dfW;
+                cache.height = dfH;
+            }
+            DistanceField& df = cache.df;
             
             // Render to output based on format
             for (int y = 0; y < height; y++) {
