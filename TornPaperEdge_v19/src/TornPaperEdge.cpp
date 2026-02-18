@@ -1691,20 +1691,7 @@ PF_Err Render(
             double srcB = inRow[x].blue / 255.0;
             double srcA = inRow[x].alpha / 255.0;
             
-            // Skip expensive edge/fiber computations for pixels far from the edge
-            bool nearEdge = (signedDist >= -earlyOutBand && signedDist <= earlyOutBand);
-            double outerEdge = 0, innerEdge = 0;
-            double middle1Edge = 0, middle2Edge = 0;
-            double contentAlpha = 1.0;
-            double paperAlpha = 0.0;
-            double fiberAlpha = 0.0;
-            double fiberShadowAlpha = 0.0;
-            double fiberColorVariation = 0.5;
-            FiberFieldResult outerFibers = {0, 0, 0.5, 0};
-            double totalPaperAlpha = 0.0;
-
-            if (nearEdge) {
-            // Edge displacements - use noise coordinates
+            // Edge displacements - always compute for correct contentAlpha
             double outerDisp = calcEdgeDisplacement(noisePx, noisePy, seed,
                 outerRoughness, outerRoughScale, outerJaggedness, outerNotch, masterScale);
             double innerDispRaw = calcEdgeDisplacement(noisePx + 1000, noisePy + 1000, seed + 5000,
@@ -1713,21 +1700,21 @@ PF_Err Render(
             double expansionFactor = (100.0 - innerExpansion) / 50.0;
             double innerDispMaxEstimate = (innerRoughness + innerJaggedness * 0.5 + innerNotch * 0.3) * masterScale * expansionFactor;
             double innerDisp = innerDispRaw - innerDispMaxEstimate;
-            
+
             double halfGap = gapWidth / 2.0;
-            outerEdge = -halfGap + outerDisp;
-            innerEdge = halfGap + innerDisp;
-            
+            double outerEdge = -halfGap + outerDisp;
+            double innerEdge = halfGap + innerDisp;
+
             if (innerEdge < outerEdge + 2.0) {
                 double mid = (innerEdge + outerEdge) / 2.0;
                 innerEdge = mid + 1.0;
                 outerEdge = mid - 1.0;
             }
-            
+
             // Middle edges
-            middle1Edge = outerEdge;
-            middle2Edge = outerEdge;
-            
+            double middle1Edge = outerEdge;
+            double middle2Edge = outerEdge;
+
             if (middle1Amount > 0) {
                 double m1Disp = calcEdgeDisplacement(noisePx + 2000, noisePy + 2000, seed + 10000,
                     middle1Roughness, 100.0, middle1Roughness * 0.2, 0, masterScale);
@@ -1735,7 +1722,7 @@ PF_Err Render(
                 middle1Edge = m1Base + m1Disp * 0.4;
                 middle1Edge = clamp(middle1Edge, outerEdge + 1.0, innerEdge - 1.0);
             }
-            
+
             if (middle2Amount > 0) {
                 double m2Disp = calcEdgeDisplacement(noisePx + 3000, noisePy + 3000, seed + 15000,
                     middle2Roughness, 100.0, middle2Roughness * 0.2, 0, masterScale);
@@ -1743,12 +1730,12 @@ PF_Err Render(
                 middle2Edge = m2Base + m2Disp * 0.4;
                 middle2Edge = clamp(middle2Edge, outerEdge + 1.0, innerEdge - 1.0);
             }
-            
-            // Alphas
-            double softness = safeMax(0.5, edgeSoftness);
-            contentAlpha = smoothstep(innerEdge - softness, innerEdge + softness, signedDist);
 
-            paperAlpha = 0.0;
+            // Alphas - computed from actual displaced edge positions
+            double softness = safeMax(0.5, edgeSoftness);
+            double contentAlpha = smoothstep(innerEdge - softness, innerEdge + softness, signedDist);
+
+            double paperAlpha = 0.0;
             if (signedDist <= outerEdge - softness) {
                 paperAlpha = 0.0;
             } else if (signedDist >= innerEdge + softness) {
@@ -1760,9 +1747,23 @@ PF_Err Render(
             } else {
                 paperAlpha = 1.0 - smoothstep(innerEdge - softness, innerEdge + softness, signedDist);
             }
-            
-            // Fibers
-            if (fibersEnabled) {
+
+            // Skip expensive fiber computations if pixel is far from all edges
+            // Uses actual displaced edge positions so this is always correct
+            double fiberAlpha = 0.0;
+            double fiberShadowAlpha = 0.0;
+            double fiberColorVariation = 0.5;
+            FiberFieldResult outerFibers = {0, 0, 0.5, 0};
+
+            double fiberMargin = fiberRange + 5.0;
+            bool needFibers = fibersEnabled && (
+                fabs(signedDist - outerEdge) <= fiberMargin ||
+                fabs(signedDist - innerEdge) <= fiberMargin ||
+                (middle1Amount > 0 && middle1FiberDensity > 0 && fabs(signedDist - middle1Edge) <= fiberMargin) ||
+                (middle2Amount > 0 && middle2FiberDensity > 0 && fabs(signedDist - middle2Edge) <= fiberMargin)
+            );
+
+            if (needFibers) {
                 outerFibers = fiberField(px, py, signedDist - outerEdge, gradX, gradY,
                     fiberDensity, fiberLength, fiberThickness, fiberSpread,
                     fiberSoftness, fiberFeather, fiberRange, seed + 1000);
@@ -1809,13 +1810,12 @@ PF_Err Render(
                 }
             }
 
-            totalPaperAlpha = safeMax(paperAlpha, fiberAlpha);
-            } // end nearEdge
+            double totalPaperAlpha = safeMax(paperAlpha, fiberAlpha);
 
-            // Compute paper texture once and reuse for both backing and paper color
+            // Compute paper texture - skip for fully opaque content pixels with no paper visible
             double paperTex = 0.0;
             double paperTexBlue = 0.0;
-            if (paperTexture > 0 && (nearEdge || srcA < 0.99 || foldAmount > 0)) {
+            if (paperTexture > 0 && (totalPaperAlpha > 0.01 || contentAlpha < 0.99 || foldAmount > 0)) {
                 double texScale = 3.0 * masterScale;
                 double grain1 = fbm2D(px / texScale, py / texScale, seed + 7000, 3, 0.5);
                 double grain2 = valueNoise2D(px / (texScale * 0.5), py / (texScale * 0.5), seed + 8000);
@@ -2487,20 +2487,7 @@ PF_Err SmartRender(
                         }
                     }
                     
-                    // Skip expensive edge/fiber computations for pixels far from the edge
-                    bool nearEdge = (signedDist >= -earlyOutBand && signedDist <= earlyOutBand);
-                    double outerEdge = 0, innerEdge = 0;
-                    double middle1Edge = 0, middle2Edge = 0;
-                    double contentAlpha = 1.0;
-                    double paperAlpha = 0.0;
-                    double fiberAlpha = 0.0;
-                    double fiberShadowAlpha = 0.0;
-                    double fiberColorVariation = 0.5;
-                    FiberFieldResult outerFibers = {0, 0, 0.5, 0};
-                    double totalPaperAlpha = 0.0;
-
-                    if (nearEdge) {
-                    // Edge displacements - use noise coordinates for consistency
+                    // Edge displacements - always compute for correct contentAlpha
                     // masterScale is already scaled for pixel sizes, noisePx/noisePy for noise
                     double outerDisp = calcEdgeDisplacement(noisePx, noisePy, seed,
                         outerRoughness, outerRoughScale, outerJaggedness, outerNotch, masterScale);
@@ -2513,21 +2500,21 @@ PF_Err SmartRender(
                     double expansionFactor = (100.0 - innerExpansion) / 50.0;  // 0 at 100, 1 at 50, ~2 at 1
                     double innerDispMaxEstimate = (innerRoughness + innerJaggedness * 0.5 + innerNotch * 0.3) * masterScale * expansionFactor;
                     double innerDisp = innerDispRaw - innerDispMaxEstimate;
-                    
+
                     double halfGap = gapWidth / 2.0;
-                    outerEdge = -halfGap + outerDisp;
-                    innerEdge = halfGap + innerDisp;
-                    
+                    double outerEdge = -halfGap + outerDisp;
+                    double innerEdge = halfGap + innerDisp;
+
                     if (innerEdge < outerEdge + 2.0) {
                         double mid = (innerEdge + outerEdge) / 2.0;
                         innerEdge = mid + 1.0;
                         outerEdge = mid - 1.0;
                     }
-                    
+
                     // Middle edges
-                    middle1Edge = outerEdge;
-                    middle2Edge = outerEdge;
-                    
+                    double middle1Edge = outerEdge;
+                    double middle2Edge = outerEdge;
+
                     if (middle1Amount > 0) {
                         double m1Disp = calcEdgeDisplacement(noisePx + 2000, noisePy + 2000, seed + 10000,
                             middle1Roughness, 100.0, middle1Roughness * 0.2, 0, masterScale);
@@ -2535,7 +2522,7 @@ PF_Err SmartRender(
                         middle1Edge = m1Base + m1Disp * 0.4;
                         middle1Edge = clamp(middle1Edge, outerEdge + 1.0, innerEdge - 1.0);
                     }
-                    
+
                     if (middle2Amount > 0) {
                         double m2Disp = calcEdgeDisplacement(noisePx + 3000, noisePy + 3000, seed + 15000,
                             middle2Roughness, 100.0, middle2Roughness * 0.2, 0, masterScale);
@@ -2543,12 +2530,12 @@ PF_Err SmartRender(
                         middle2Edge = m2Base + m2Disp * 0.4;
                         middle2Edge = clamp(middle2Edge, outerEdge + 1.0, innerEdge - 1.0);
                     }
-                    
-                    // Alphas
-                    double softness = safeMax(0.5, edgeSoftness);
-                    contentAlpha = smoothstep(innerEdge - softness, innerEdge + softness, signedDist);
 
-                    paperAlpha = 0.0;
+                    // Alphas - computed from actual displaced edge positions
+                    double softness = safeMax(0.5, edgeSoftness);
+                    double contentAlpha = smoothstep(innerEdge - softness, innerEdge + softness, signedDist);
+
+                    double paperAlpha = 0.0;
                     if (signedDist <= outerEdge - softness) {
                         paperAlpha = 0.0;
                     } else if (signedDist >= innerEdge + softness) {
@@ -2560,9 +2547,23 @@ PF_Err SmartRender(
                     } else {
                         paperAlpha = 1.0 - smoothstep(innerEdge - softness, innerEdge + softness, signedDist);
                     }
-                    
-                    // Fibers - use noise coordinates for consistency
-                    if (fibersEnabled) {
+
+                    // Skip expensive fiber computations if pixel is far from all edges
+                    // Uses actual displaced edge positions so this is always correct
+                    double fiberAlpha = 0.0;
+                    double fiberShadowAlpha = 0.0;
+                    double fiberColorVariation = 0.5;
+                    FiberFieldResult outerFibers = {0, 0, 0.5, 0};
+
+                    double fiberMargin = fiberRange + 5.0;
+                    bool needFibers = fibersEnabled && (
+                        fabs(signedDist - outerEdge) <= fiberMargin ||
+                        fabs(signedDist - innerEdge) <= fiberMargin ||
+                        (middle1Amount > 0 && middle1FiberDensity > 0 && fabs(signedDist - middle1Edge) <= fiberMargin) ||
+                        (middle2Amount > 0 && middle2FiberDensity > 0 && fabs(signedDist - middle2Edge) <= fiberMargin)
+                    );
+
+                    if (needFibers) {
                         outerFibers = fiberField(noisePx, noisePy, signedDist - outerEdge, gradX, gradY,
                             fiberDensity, fiberLength, fiberThickness, fiberSpread,
                             fiberSoftness, fiberFeather, fiberRange, seed + 1000);
@@ -2609,13 +2610,12 @@ PF_Err SmartRender(
                         }
                     }
 
-                    totalPaperAlpha = safeMax(paperAlpha, fiberAlpha);
-                    } // end nearEdge
+                    double totalPaperAlpha = safeMax(paperAlpha, fiberAlpha);
 
-                    // Compute paper texture once and reuse for both backing and paper color
+                    // Compute paper texture - skip for fully opaque content pixels with no paper visible
                     double paperTex = 0.0;
                     double paperTexBlue = 0.0;
-                    if (paperTexture > 0 && (nearEdge || srcA < 0.99 || foldAmount > 0)) {
+                    if (paperTexture > 0 && (totalPaperAlpha > 0.01 || contentAlpha < 0.99 || foldAmount > 0)) {
                         double texScale = 3.0 * masterScale / downsampleFactor;
                         double grain1 = fbm2D(noisePx / texScale, noisePy / texScale, seed + 7000, 3, 0.5);
                         double grain2 = valueNoise2D(noisePx / (texScale * 0.5), noisePy / (texScale * 0.5), seed + 8000);
