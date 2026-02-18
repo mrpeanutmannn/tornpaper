@@ -103,6 +103,7 @@ enum {
     
     // Fibers (nested in Paper)
     PARAM_TOPIC_FIBERS,
+    PARAM_FIBER_ENABLE,
     PARAM_FIBER_DENSITY,
     PARAM_FIBER_LENGTH,
     PARAM_FIBER_THICKNESS,

@@ -319,7 +319,10 @@ PF_Err ParamsSetup(
     
     AEFX_CLR_STRUCT(def);
     PF_ADD_TOPIC("Fibers", PARAM_TOPIC_FIBERS);
-    
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_CHECKBOX("Enable Fibers", "", TRUE, 0, PARAM_FIBER_ENABLE);
+
     AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Fiber Density", 0.0, 100.0, 0.0, 100.0, 28.0,
         PF_Precision_TENTHS, 0, 0, PARAM_FIBER_DENSITY);
@@ -1545,6 +1548,7 @@ PF_Err Render(
     double innerShadowWidth = params[PARAM_CONTENT_SHADOW_WIDTH]->u.fs_d.value * masterScale;
     
     // Fibers
+    bool fibersEnabled = params[PARAM_FIBER_ENABLE]->u.bd.value != 0;
     double fiberDensity = params[PARAM_FIBER_DENSITY]->u.fs_d.value;
     double fiberLength = params[PARAM_FIBER_LENGTH]->u.fs_d.value * masterScale;
     double fiberThickness = params[PARAM_FIBER_THICKNESS]->u.fs_d.value * masterScale;
@@ -1726,52 +1730,58 @@ PF_Err Render(
             }
             
             // Fibers
-            FiberFieldResult outerFibers = fiberField(px, py, signedDist - outerEdge, gradX, gradY,
-                fiberDensity, fiberLength, fiberThickness, fiberSpread, 
-                fiberSoftness, fiberFeather, fiberRange, seed + 1000);
-            
-            FiberFieldResult innerFibers = fiberField(px, py, signedDist - innerEdge, -gradX, -gradY,
-                fiberDensity * 0.7, fiberLength * 0.8, fiberThickness, fiberSpread,
-                fiberSoftness, fiberFeather, fiberRange, seed + 2000);
-            
-            FiberFieldResult middle1Fibers = {0, 0, 0.5, 0};
-            FiberFieldResult middle2Fibers = {0, 0, 0.5, 0};
-            
-            if (middle1Amount > 0 && middle1FiberDensity > 0) {
-                middle1Fibers = fiberField(px, py, signedDist - middle1Edge, -gradX, -gradY,
-                    middle1FiberDensity, fiberLength * 0.6, fiberThickness, fiberSpread,
-                    fiberSoftness, fiberFeather, fiberRange * 0.5, seed + 3000);
-                middle1Fibers.opacity *= middle1Amount;
-                middle1Fibers.shadowOpacity *= middle1Amount;
-            }
-            
-            if (middle2Amount > 0 && middle2FiberDensity > 0) {
-                middle2Fibers = fiberField(px, py, signedDist - middle2Edge, -gradX, -gradY,
-                    middle2FiberDensity, fiberLength * 0.6, fiberThickness, fiberSpread,
-                    fiberSoftness, fiberFeather, fiberRange * 0.5, seed + 4000);
-                middle2Fibers.opacity *= middle2Amount;
-                middle2Fibers.shadowOpacity *= middle2Amount;
-            }
-            
-            double fiberAlpha = safeMax(safeMax(outerFibers.opacity, innerFibers.opacity),
-                                        safeMax(middle1Fibers.opacity, middle2Fibers.opacity));
-            fiberAlpha *= fiberOpacity;
-            
-            double fiberShadowAlpha = safeMax(safeMax(outerFibers.shadowOpacity, innerFibers.shadowOpacity),
-                                              safeMax(middle1Fibers.shadowOpacity, middle2Fibers.shadowOpacity));
-            fiberShadowAlpha *= fiberOpacity;
-            
+            double fiberAlpha = 0.0;
+            double fiberShadowAlpha = 0.0;
             double fiberColorVariation = 0.5;
-            double maxFiberOp = fiberAlpha / safeMax(0.001, fiberOpacity);
-            if (outerFibers.opacity >= maxFiberOp - 0.01) fiberColorVariation = outerFibers.colorVar;
-            else if (innerFibers.opacity >= maxFiberOp - 0.01) fiberColorVariation = innerFibers.colorVar;
-            
-            if (fiberBlur > 0 && fiberAlpha > 0) {
-                double blurFactor = 1.0 / (1.0 + fiberBlur * 0.2);
-                fiberAlpha *= blurFactor;
-                fiberShadowAlpha *= blurFactor;
+            FiberFieldResult outerFibers = {0, 0, 0.5, 0};
+
+            if (fibersEnabled) {
+                outerFibers = fiberField(px, py, signedDist - outerEdge, gradX, gradY,
+                    fiberDensity, fiberLength, fiberThickness, fiberSpread,
+                    fiberSoftness, fiberFeather, fiberRange, seed + 1000);
+
+                FiberFieldResult innerFibers = fiberField(px, py, signedDist - innerEdge, -gradX, -gradY,
+                    fiberDensity * 0.7, fiberLength * 0.8, fiberThickness, fiberSpread,
+                    fiberSoftness, fiberFeather, fiberRange, seed + 2000);
+
+                FiberFieldResult middle1Fibers = {0, 0, 0.5, 0};
+                FiberFieldResult middle2Fibers = {0, 0, 0.5, 0};
+
+                if (middle1Amount > 0 && middle1FiberDensity > 0) {
+                    middle1Fibers = fiberField(px, py, signedDist - middle1Edge, -gradX, -gradY,
+                        middle1FiberDensity, fiberLength * 0.6, fiberThickness, fiberSpread,
+                        fiberSoftness, fiberFeather, fiberRange * 0.5, seed + 3000);
+                    middle1Fibers.opacity *= middle1Amount;
+                    middle1Fibers.shadowOpacity *= middle1Amount;
+                }
+
+                if (middle2Amount > 0 && middle2FiberDensity > 0) {
+                    middle2Fibers = fiberField(px, py, signedDist - middle2Edge, -gradX, -gradY,
+                        middle2FiberDensity, fiberLength * 0.6, fiberThickness, fiberSpread,
+                        fiberSoftness, fiberFeather, fiberRange * 0.5, seed + 4000);
+                    middle2Fibers.opacity *= middle2Amount;
+                    middle2Fibers.shadowOpacity *= middle2Amount;
+                }
+
+                fiberAlpha = safeMax(safeMax(outerFibers.opacity, innerFibers.opacity),
+                                            safeMax(middle1Fibers.opacity, middle2Fibers.opacity));
+                fiberAlpha *= fiberOpacity;
+
+                fiberShadowAlpha = safeMax(safeMax(outerFibers.shadowOpacity, innerFibers.shadowOpacity),
+                                                  safeMax(middle1Fibers.shadowOpacity, middle2Fibers.shadowOpacity));
+                fiberShadowAlpha *= fiberOpacity;
+
+                double maxFiberOp = fiberAlpha / safeMax(0.001, fiberOpacity);
+                if (outerFibers.opacity >= maxFiberOp - 0.01) fiberColorVariation = outerFibers.colorVar;
+                else if (innerFibers.opacity >= maxFiberOp - 0.01) fiberColorVariation = innerFibers.colorVar;
+
+                if (fiberBlur > 0 && fiberAlpha > 0) {
+                    double blurFactor = 1.0 / (1.0 + fiberBlur * 0.2);
+                    fiberAlpha *= blurFactor;
+                    fiberShadowAlpha *= blurFactor;
+                }
             }
-            
+
             double totalPaperAlpha = safeMax(paperAlpha, fiberAlpha);
             
             // Compute paper texture once and reuse for both backing and paper color
@@ -2125,6 +2135,7 @@ PF_Err SmartRender(
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_FIBER_COLOR, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_FIBER_COLOR]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_CONTENT_SHADOW_AMOUNT, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_CONTENT_SHADOW_AMOUNT]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_CONTENT_SHADOW_WIDTH, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_CONTENT_SHADOW_WIDTH]));
+        ERR(PF_CHECKOUT_PARAM(in_data, PARAM_FIBER_ENABLE, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_FIBER_ENABLE]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_FIBER_DENSITY, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_FIBER_DENSITY]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_FIBER_LENGTH, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_FIBER_LENGTH]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_FIBER_THICKNESS, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_FIBER_THICKNESS]));
@@ -2238,6 +2249,7 @@ PF_Err SmartRender(
             double innerShadowAmount = params[PARAM_CONTENT_SHADOW_AMOUNT].u.fs_d.value / 100.0;
             double innerShadowWidth = params[PARAM_CONTENT_SHADOW_WIDTH].u.fs_d.value * masterScale;
             
+            bool fibersEnabled = params[PARAM_FIBER_ENABLE].u.bd.value != 0;
             double fiberDensity = params[PARAM_FIBER_DENSITY].u.fs_d.value;
             double fiberLength = params[PARAM_FIBER_LENGTH].u.fs_d.value * masterScale;
             double fiberThickness = params[PARAM_FIBER_THICKNESS].u.fs_d.value * masterScale;
@@ -2464,52 +2476,58 @@ PF_Err SmartRender(
                     }
                     
                     // Fibers - use noise coordinates for consistency
-                    FiberFieldResult outerFibers = fiberField(noisePx, noisePy, signedDist - outerEdge, gradX, gradY,
-                        fiberDensity, fiberLength, fiberThickness, fiberSpread, 
-                        fiberSoftness, fiberFeather, fiberRange, seed + 1000);
-                    
-                    FiberFieldResult innerFibers = fiberField(noisePx, noisePy, signedDist - innerEdge, -gradX, -gradY,
-                        fiberDensity * 0.7, fiberLength * 0.8, fiberThickness, fiberSpread,
-                        fiberSoftness, fiberFeather, fiberRange, seed + 2000);
-                    
-                    FiberFieldResult middle1Fibers = {0, 0, 0.5, 0};
-                    FiberFieldResult middle2Fibers = {0, 0, 0.5, 0};
-                    
-                    if (middle1Amount > 0 && middle1FiberDensity > 0) {
-                        middle1Fibers = fiberField(noisePx, noisePy, signedDist - middle1Edge, -gradX, -gradY,
-                            middle1FiberDensity, fiberLength * 0.6, fiberThickness, fiberSpread,
-                            fiberSoftness, fiberFeather, fiberRange * 0.5, seed + 3000);
-                        middle1Fibers.opacity *= middle1Amount;
-                        middle1Fibers.shadowOpacity *= middle1Amount;
-                    }
-                    
-                    if (middle2Amount > 0 && middle2FiberDensity > 0) {
-                        middle2Fibers = fiberField(noisePx, noisePy, signedDist - middle2Edge, -gradX, -gradY,
-                            middle2FiberDensity, fiberLength * 0.6, fiberThickness, fiberSpread,
-                            fiberSoftness, fiberFeather, fiberRange * 0.5, seed + 4000);
-                        middle2Fibers.opacity *= middle2Amount;
-                        middle2Fibers.shadowOpacity *= middle2Amount;
-                    }
-                    
-                    double fiberAlpha = safeMax(safeMax(outerFibers.opacity, innerFibers.opacity),
-                                                safeMax(middle1Fibers.opacity, middle2Fibers.opacity));
-                    fiberAlpha *= fiberOpacity;
-                    
-                    double fiberShadowAlpha = safeMax(safeMax(outerFibers.shadowOpacity, innerFibers.shadowOpacity),
-                                                      safeMax(middle1Fibers.shadowOpacity, middle2Fibers.shadowOpacity));
-                    fiberShadowAlpha *= fiberOpacity;
-                    
+                    double fiberAlpha = 0.0;
+                    double fiberShadowAlpha = 0.0;
                     double fiberColorVariation = 0.5;
-                    double maxFiberOp = fiberAlpha / safeMax(0.001, fiberOpacity);
-                    if (outerFibers.opacity >= maxFiberOp - 0.01) fiberColorVariation = outerFibers.colorVar;
-                    else if (innerFibers.opacity >= maxFiberOp - 0.01) fiberColorVariation = innerFibers.colorVar;
-                    
-                    if (fiberBlur > 0 && fiberAlpha > 0) {
-                        double blurFactor = 1.0 / (1.0 + fiberBlur * 0.2);
-                        fiberAlpha *= blurFactor;
-                        fiberShadowAlpha *= blurFactor;
+                    FiberFieldResult outerFibers = {0, 0, 0.5, 0};
+
+                    if (fibersEnabled) {
+                        outerFibers = fiberField(noisePx, noisePy, signedDist - outerEdge, gradX, gradY,
+                            fiberDensity, fiberLength, fiberThickness, fiberSpread,
+                            fiberSoftness, fiberFeather, fiberRange, seed + 1000);
+
+                        FiberFieldResult innerFibers = fiberField(noisePx, noisePy, signedDist - innerEdge, -gradX, -gradY,
+                            fiberDensity * 0.7, fiberLength * 0.8, fiberThickness, fiberSpread,
+                            fiberSoftness, fiberFeather, fiberRange, seed + 2000);
+
+                        FiberFieldResult middle1Fibers = {0, 0, 0.5, 0};
+                        FiberFieldResult middle2Fibers = {0, 0, 0.5, 0};
+
+                        if (middle1Amount > 0 && middle1FiberDensity > 0) {
+                            middle1Fibers = fiberField(noisePx, noisePy, signedDist - middle1Edge, -gradX, -gradY,
+                                middle1FiberDensity, fiberLength * 0.6, fiberThickness, fiberSpread,
+                                fiberSoftness, fiberFeather, fiberRange * 0.5, seed + 3000);
+                            middle1Fibers.opacity *= middle1Amount;
+                            middle1Fibers.shadowOpacity *= middle1Amount;
+                        }
+
+                        if (middle2Amount > 0 && middle2FiberDensity > 0) {
+                            middle2Fibers = fiberField(noisePx, noisePy, signedDist - middle2Edge, -gradX, -gradY,
+                                middle2FiberDensity, fiberLength * 0.6, fiberThickness, fiberSpread,
+                                fiberSoftness, fiberFeather, fiberRange * 0.5, seed + 4000);
+                            middle2Fibers.opacity *= middle2Amount;
+                            middle2Fibers.shadowOpacity *= middle2Amount;
+                        }
+
+                        fiberAlpha = safeMax(safeMax(outerFibers.opacity, innerFibers.opacity),
+                                                    safeMax(middle1Fibers.opacity, middle2Fibers.opacity));
+                        fiberAlpha *= fiberOpacity;
+
+                        fiberShadowAlpha = safeMax(safeMax(outerFibers.shadowOpacity, innerFibers.shadowOpacity),
+                                                          safeMax(middle1Fibers.shadowOpacity, middle2Fibers.shadowOpacity));
+                        fiberShadowAlpha *= fiberOpacity;
+
+                        double maxFiberOp = fiberAlpha / safeMax(0.001, fiberOpacity);
+                        if (outerFibers.opacity >= maxFiberOp - 0.01) fiberColorVariation = outerFibers.colorVar;
+                        else if (innerFibers.opacity >= maxFiberOp - 0.01) fiberColorVariation = innerFibers.colorVar;
+
+                        if (fiberBlur > 0 && fiberAlpha > 0) {
+                            double blurFactor = 1.0 / (1.0 + fiberBlur * 0.2);
+                            fiberAlpha *= blurFactor;
+                            fiberShadowAlpha *= blurFactor;
+                        }
                     }
-                    
+
                     double totalPaperAlpha = safeMax(paperAlpha, fiberAlpha);
                     
                     // Compute paper texture once and reuse for both backing and paper color
@@ -2783,6 +2801,7 @@ PF_Err SmartRender(
         PF_CHECKIN_PARAM(in_data, &params[PARAM_FIBER_COLOR]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_CONTENT_SHADOW_AMOUNT]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_CONTENT_SHADOW_WIDTH]);
+        PF_CHECKIN_PARAM(in_data, &params[PARAM_FIBER_ENABLE]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_FIBER_DENSITY]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_FIBER_LENGTH]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_FIBER_THICKNESS]);
