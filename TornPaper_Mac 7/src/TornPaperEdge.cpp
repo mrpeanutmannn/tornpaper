@@ -1671,13 +1671,6 @@ PF_Err Render(
     }
     DistanceField& df = cache.df;
 
-    // Pre-compute maximum edge effect reach for early-out optimization
-    double maxDisp = safeMax(
-        (outerRoughness + outerJaggedness * 0.5 + outerNotch * 0.3) * masterScale,
-        (innerRoughness + innerJaggedness * 0.5 + innerNotch * 0.3) * masterScale) * 2.0;
-    double earlyOutBand = gapWidth / 2.0 + maxDisp + fiberRange
-        + safeMax(shadowWidth, innerShadowWidth) + edgeSoftness + 20.0;
-
     // Render - parallelized across CPU cores
     {
     int numThreads = std::max(1, (int)std::thread::hardware_concurrency());
@@ -1702,31 +1695,12 @@ PF_Err Render(
             float gradX, gradY;
             df.getGradient(x, y, gradX, gradY);
 
-            // Early-out: pixel far outside the edge - completely transparent
-            if (signedDist < -earlyOutBand) {
-                outRow[x].alpha = 0; outRow[x].red = 0; outRow[x].green = 0; outRow[x].blue = 0;
-                continue;
-            }
-
             // Source pixel
             double srcR = inRow[x].red / 255.0;
             double srcG = inRow[x].green / 255.0;
             double srcB = inRow[x].blue / 255.0;
             double srcA = inRow[x].alpha / 255.0;
 
-            // Skip expensive edge/fiber computations for pixels far from the edge
-            bool nearEdge = (signedDist >= -earlyOutBand && signedDist <= earlyOutBand);
-            double outerEdge = 0, innerEdge = 0;
-            double middle1Edge = 0, middle2Edge = 0;
-            double contentAlpha = 1.0;
-            double paperAlpha = 0.0;
-            double fiberAlpha = 0.0;
-            double fiberShadowAlpha = 0.0;
-            double fiberColorVariation = 0.5;
-            FiberFieldResult outerFibers = {0, 0, 0.5, 0};
-            double totalPaperAlpha = 0.0;
-
-            if (nearEdge) {
             // Edge displacements - use noise coordinates
             double outerDisp = calcEdgeDisplacement(noisePx, noisePy, seed,
                 outerRoughness, outerRoughScale, outerJaggedness, outerNotch, masterScale);
@@ -1738,8 +1712,8 @@ PF_Err Render(
             double innerDisp = innerDispRaw - innerDispMaxEstimate;
 
             double halfGap = gapWidth / 2.0;
-            outerEdge = -halfGap + outerDisp;
-            innerEdge = halfGap + innerDisp;
+            double outerEdge = -halfGap + outerDisp;
+            double innerEdge = halfGap + innerDisp;
 
             if (innerEdge < outerEdge + 2.0) {
                 double mid = (innerEdge + outerEdge) / 2.0;
@@ -1748,8 +1722,8 @@ PF_Err Render(
             }
 
             // Middle edges
-            middle1Edge = outerEdge;
-            middle2Edge = outerEdge;
+            double middle1Edge = outerEdge;
+            double middle2Edge = outerEdge;
 
             if (middle1Amount > 0) {
                 double m1Disp = calcEdgeDisplacement(noisePx + 2000, noisePy + 2000, seed + 10000,
@@ -1769,9 +1743,9 @@ PF_Err Render(
             
             // Alphas
             double softness = safeMax(0.5, edgeSoftness);
-            contentAlpha = smoothstep(innerEdge - softness, innerEdge + softness, signedDist);
+            double contentAlpha = smoothstep(innerEdge - softness, innerEdge + softness, signedDist);
 
-            paperAlpha = 0.0;
+            double paperAlpha = 0.0;
             if (signedDist <= outerEdge - softness) {
                 paperAlpha = 0.0;
             } else if (signedDist >= innerEdge + softness) {
@@ -1785,6 +1759,11 @@ PF_Err Render(
             }
             
             // Fibers
+            double fiberAlpha = 0.0;
+            double fiberShadowAlpha = 0.0;
+            double fiberColorVariation = 0.5;
+            FiberFieldResult outerFibers = {0, 0, 0.5, 0};
+
             if (fibersEnabled) {
                 outerFibers = fiberField(px, py, signedDist - outerEdge, gradX, gradY,
                     fiberDensity, fiberLength, fiberThickness, fiberSpread,
@@ -1832,13 +1811,12 @@ PF_Err Render(
                 }
             }
 
-            totalPaperAlpha = safeMax(paperAlpha, fiberAlpha);
-            } // end nearEdge
+            double totalPaperAlpha = safeMax(paperAlpha, fiberAlpha);
 
             // Compute paper texture once and reuse for both backing and paper color
             double paperTex = 0.0;
             double paperTexBlue = 0.0;
-            if (paperTexture > 0 && (nearEdge || srcA < 0.99 || foldAmount > 0)) {
+            if (paperTexture > 0) {
                 double texScale = 3.0 * masterScale;
                 double grain1 = fbm2D(px / texScale, py / texScale, seed + 7000, 3, 0.5);
                 double grain2 = valueNoise2D(px / (texScale * 0.5), py / (texScale * 0.5), seed + 8000);
@@ -2429,13 +2407,6 @@ PF_Err SmartRender(
             }
             DistanceField& df = cache.df;
 
-            // Pre-compute maximum edge effect reach for early-out optimization
-            double maxDisp = safeMax(
-                (outerRoughness + outerJaggedness * 0.5 + outerNotch * 0.3) * masterScale,
-                (innerRoughness + innerJaggedness * 0.5 + innerNotch * 0.3) * masterScale) * 2.0;
-            double earlyOutBand = gapWidth / 2.0 + maxDisp + fiberRange
-                + safeMax(shadowWidth, innerShadowWidth) + edgeSoftness + 20.0;
-
             // Render to output based on format - parallelized across CPU cores
             {
             int numThreads = std::max(1, (int)std::thread::hardware_concurrency());
@@ -2466,21 +2437,6 @@ PF_Err SmartRender(
                     float gradX, gradY;
                     df.getGradient(dfX, dfY, gradX, gradY);
 
-                    // Early-out: pixel far outside the edge - completely transparent
-                    if (signedDist < -earlyOutBand) {
-                        if (isFloat) {
-                            PF_PixelFloat* outRow = (PF_PixelFloat*)((char*)output->data + y * output->rowbytes);
-                            outRow[x].alpha = 0; outRow[x].red = 0; outRow[x].green = 0; outRow[x].blue = 0;
-                        } else if (is16bit) {
-                            PF_Pixel16* outRow = (PF_Pixel16*)((char*)output->data + y * output->rowbytes);
-                            outRow[x].alpha = 0; outRow[x].red = 0; outRow[x].green = 0; outRow[x].blue = 0;
-                        } else {
-                            PF_Pixel8* outRow = (PF_Pixel8*)((char*)output->data + y * output->rowbytes);
-                            outRow[x].alpha = 0; outRow[x].red = 0; outRow[x].green = 0; outRow[x].blue = 0;
-                        }
-                        continue;
-                    }
-
                     // Get source pixel (with bounds check) - normalized to 0.0-1.0
                     double srcR = 0, srcG = 0, srcB = 0, srcA = 0;
                     if (inX >= 0 && inX < input->width && inY >= 0 && inY < input->height) {
@@ -2508,19 +2464,6 @@ PF_Err SmartRender(
                         }
                     }
 
-                    // Skip expensive edge/fiber computations for pixels far from the edge
-                    bool nearEdge = (signedDist >= -earlyOutBand && signedDist <= earlyOutBand);
-                    double outerEdge = 0, innerEdge = 0;
-                    double middle1Edge = 0, middle2Edge = 0;
-                    double contentAlpha = 1.0;
-                    double paperAlpha = 0.0;
-                    double fiberAlpha = 0.0;
-                    double fiberShadowAlpha = 0.0;
-                    double fiberColorVariation = 0.5;
-                    FiberFieldResult outerFibers = {0, 0, 0.5, 0};
-                    double totalPaperAlpha = 0.0;
-
-                    if (nearEdge) {
                     // Edge displacements - use noise coordinates for consistency
                     // masterScale is already scaled for pixel sizes, noisePx/noisePy for noise
                     double outerDisp = calcEdgeDisplacement(noisePx, noisePy, seed,
@@ -2536,8 +2479,8 @@ PF_Err SmartRender(
                     double innerDisp = innerDispRaw - innerDispMaxEstimate;
 
                     double halfGap = gapWidth / 2.0;
-                    outerEdge = -halfGap + outerDisp;
-                    innerEdge = halfGap + innerDisp;
+                    double outerEdge = -halfGap + outerDisp;
+                    double innerEdge = halfGap + innerDisp;
 
                     if (innerEdge < outerEdge + 2.0) {
                         double mid = (innerEdge + outerEdge) / 2.0;
@@ -2546,8 +2489,8 @@ PF_Err SmartRender(
                     }
 
                     // Middle edges
-                    middle1Edge = outerEdge;
-                    middle2Edge = outerEdge;
+                    double middle1Edge = outerEdge;
+                    double middle2Edge = outerEdge;
 
                     if (middle1Amount > 0) {
                         double m1Disp = calcEdgeDisplacement(noisePx + 2000, noisePy + 2000, seed + 10000,
@@ -2567,9 +2510,9 @@ PF_Err SmartRender(
 
                     // Alphas
                     double softness = safeMax(0.5, edgeSoftness);
-                    contentAlpha = smoothstep(innerEdge - softness, innerEdge + softness, signedDist);
+                    double contentAlpha = smoothstep(innerEdge - softness, innerEdge + softness, signedDist);
 
-                    paperAlpha = 0.0;
+                    double paperAlpha = 0.0;
                     if (signedDist <= outerEdge - softness) {
                         paperAlpha = 0.0;
                     } else if (signedDist >= innerEdge + softness) {
@@ -2583,6 +2526,11 @@ PF_Err SmartRender(
                     }
 
                     // Fibers - use noise coordinates for consistency
+                    double fiberAlpha = 0.0;
+                    double fiberShadowAlpha = 0.0;
+                    double fiberColorVariation = 0.5;
+                    FiberFieldResult outerFibers = {0, 0, 0.5, 0};
+
                     if (fibersEnabled) {
                         outerFibers = fiberField(noisePx, noisePy, signedDist - outerEdge, gradX, gradY,
                             fiberDensity, fiberLength, fiberThickness, fiberSpread,
@@ -2630,13 +2578,12 @@ PF_Err SmartRender(
                         }
                     }
 
-                    totalPaperAlpha = safeMax(paperAlpha, fiberAlpha);
-                    } // end nearEdge
+                    double totalPaperAlpha = safeMax(paperAlpha, fiberAlpha);
 
                     // Compute paper texture once and reuse for both backing and paper color
                     double paperTex = 0.0;
                     double paperTexBlue = 0.0;
-                    if (paperTexture > 0 && (nearEdge || srcA < 0.99 || foldAmount > 0)) {
+                    if (paperTexture > 0) {
                         double texScale = 3.0 * masterScale / downsampleFactor;
                         double grain1 = fbm2D(noisePx / texScale, noisePy / texScale, seed + 7000, 3, 0.5);
                         double grain2 = valueNoise2D(noisePx / (texScale * 0.5), noisePy / (texScale * 0.5), seed + 8000);
