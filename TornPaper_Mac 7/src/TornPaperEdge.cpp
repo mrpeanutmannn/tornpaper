@@ -1758,13 +1758,22 @@ PF_Err Render(
                 paperAlpha = 1.0 - smoothstep(innerEdge - softness, innerEdge + softness, signedDist);
             }
             
-            // Fibers
+            // Skip expensive fiber computations if pixel is far from all edges
+            // Uses actual displaced edge positions so this is always correct
             double fiberAlpha = 0.0;
             double fiberShadowAlpha = 0.0;
             double fiberColorVariation = 0.5;
             FiberFieldResult outerFibers = {0, 0, 0.5, 0};
 
-            if (fibersEnabled) {
+            double fiberMargin = fiberRange + 5.0;
+            bool needFibers = fibersEnabled && (
+                fabs(signedDist - outerEdge) <= fiberMargin ||
+                fabs(signedDist - innerEdge) <= fiberMargin ||
+                (middle1Amount > 0 && middle1FiberDensity > 0 && fabs(signedDist - middle1Edge) <= fiberMargin) ||
+                (middle2Amount > 0 && middle2FiberDensity > 0 && fabs(signedDist - middle2Edge) <= fiberMargin)
+            );
+
+            if (needFibers) {
                 outerFibers = fiberField(px, py, signedDist - outerEdge, gradX, gradY,
                     fiberDensity, fiberLength, fiberThickness, fiberSpread,
                     fiberSoftness, fiberFeather, fiberRange, seed + 1000);
@@ -1813,10 +1822,10 @@ PF_Err Render(
 
             double totalPaperAlpha = safeMax(paperAlpha, fiberAlpha);
 
-            // Compute paper texture once and reuse for both backing and paper color
+            // Compute paper texture - skip for fully opaque content pixels with no paper visible
             double paperTex = 0.0;
             double paperTexBlue = 0.0;
-            if (paperTexture > 0) {
+            if (paperTexture > 0 && (totalPaperAlpha > 0.01 || contentAlpha < 0.99 || foldAmount > 0)) {
                 double texScale = 3.0 * masterScale;
                 double grain1 = fbm2D(px / texScale, py / texScale, seed + 7000, 3, 0.5);
                 double grain2 = valueNoise2D(px / (texScale * 0.5), py / (texScale * 0.5), seed + 8000);
@@ -2525,13 +2534,22 @@ PF_Err SmartRender(
                         paperAlpha = 1.0 - smoothstep(innerEdge - softness, innerEdge + softness, signedDist);
                     }
 
-                    // Fibers - use noise coordinates for consistency
+                    // Skip expensive fiber computations if pixel is far from all edges
+                    // Uses actual displaced edge positions so this is always correct
                     double fiberAlpha = 0.0;
                     double fiberShadowAlpha = 0.0;
                     double fiberColorVariation = 0.5;
                     FiberFieldResult outerFibers = {0, 0, 0.5, 0};
 
-                    if (fibersEnabled) {
+                    double fiberMargin = fiberRange + 5.0;
+                    bool needFibers = fibersEnabled && (
+                        fabs(signedDist - outerEdge) <= fiberMargin ||
+                        fabs(signedDist - innerEdge) <= fiberMargin ||
+                        (middle1Amount > 0 && middle1FiberDensity > 0 && fabs(signedDist - middle1Edge) <= fiberMargin) ||
+                        (middle2Amount > 0 && middle2FiberDensity > 0 && fabs(signedDist - middle2Edge) <= fiberMargin)
+                    );
+
+                    if (needFibers) {
                         outerFibers = fiberField(noisePx, noisePy, signedDist - outerEdge, gradX, gradY,
                             fiberDensity, fiberLength, fiberThickness, fiberSpread,
                             fiberSoftness, fiberFeather, fiberRange, seed + 1000);
@@ -2580,10 +2598,10 @@ PF_Err SmartRender(
 
                     double totalPaperAlpha = safeMax(paperAlpha, fiberAlpha);
 
-                    // Compute paper texture once and reuse for both backing and paper color
+                    // Compute paper texture - skip for fully opaque content pixels with no paper visible
                     double paperTex = 0.0;
                     double paperTexBlue = 0.0;
-                    if (paperTexture > 0) {
+                    if (paperTexture > 0 && (totalPaperAlpha > 0.01 || contentAlpha < 0.99 || foldAmount > 0)) {
                         double texScale = 3.0 * masterScale / downsampleFactor;
                         double grain1 = fbm2D(noisePx / texScale, noisePy / texScale, seed + 7000, 3, 0.5);
                         double grain2 = valueNoise2D(noisePx / (texScale * 0.5), noisePy / (texScale * 0.5), seed + 8000);
