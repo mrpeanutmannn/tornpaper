@@ -701,19 +701,20 @@ public:
 inline double worleyNoise(double x, double y, int seed) {
     int xi = (int)floor(x);
     int yi = (int)floor(y);
-    double minDist = 1e10;
-    
+    double minDist2 = 1e20;
+
     for (int dy = -1; dy <= 1; dy++) {
         for (int dx = -1; dx <= 1; dx++) {
             int cx = xi + dx;
             int cy = yi + dy;
             double px = cx + (double)(hash2D(cx, cy, seed) & 0xFFFF) / 65536.0;
             double py = cy + (double)(hash2D(cx, cy, seed + 1000) & 0xFFFF) / 65536.0;
-            double dist = sqrt((x - px) * (x - px) + (y - py) * (y - py));
-            if (dist < minDist) minDist = dist;
+            double ddx = x - px, ddy = y - py;
+            double dist2 = ddx * ddx + ddy * ddy;
+            if (dist2 < minDist2) minDist2 = dist2;
         }
     }
-    return minDist;
+    return sqrt(minDist2);
 }
 
 inline double ridgedMultifractal(double x, double y, int seed, int octaves) {
