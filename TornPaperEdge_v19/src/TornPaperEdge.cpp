@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <vector>
 #include <cstdint>
+#include <thread>
 
 #ifdef min
 #undef min
@@ -1647,11 +1648,16 @@ PF_Err Render(
     }
     DistanceField& df = cache.df;
 
-    // Render
-    for (int y = 0; y < height; y++) {
+    // Render - parallelized across CPU cores
+    {
+    int numThreads = std::max(1, (int)std::thread::hardware_concurrency());
+    if (numThreads > height) numThreads = height;
+
+    auto renderRows = [&](int yStart, int yEnd) {
+    for (int y = yStart; y < yEnd; y++) {
         PF_Pixel8* inRow = (PF_Pixel8*)((char*)input->data + y * input->rowbytes);
         PF_Pixel8* outRow = (PF_Pixel8*)((char*)output->data + y * output->rowbytes);
-        
+
         for (int x = 0; x < width; x++) {
             double px = (double)x;
             double py = (double)y;
@@ -2001,7 +2007,25 @@ PF_Err Render(
             outRow[x].blue  = (A_u_char)(clamp01(finalB) * finalA * 255.0);
         }
     }
-    
+    }; // end renderRows lambda
+
+    if (numThreads <= 1) {
+        renderRows(0, height);
+    } else {
+        std::vector<std::thread> threads;
+        threads.reserve(numThreads);
+        int rowsPerThread = height / numThreads;
+        int remainder = height % numThreads;
+        int yStart = 0;
+        for (int t = 0; t < numThreads; t++) {
+            int yEnd = yStart + rowsPerThread + (t < remainder ? 1 : 0);
+            threads.emplace_back(renderRows, yStart, yEnd);
+            yStart = yEnd;
+        }
+        for (auto& t : threads) t.join();
+    }
+    } // end parallel block
+
     return err;
 }
 
@@ -2362,8 +2386,13 @@ PF_Err SmartRender(
             }
             DistanceField& df = cache.df;
             
-            // Render to output based on format
-            for (int y = 0; y < height; y++) {
+            // Render to output based on format - parallelized across CPU cores
+            {
+            int numThreads = std::max(1, (int)std::thread::hardware_concurrency());
+            if (numThreads > height) numThreads = height;
+
+            auto renderRows = [&](int yStart, int yEnd) {
+            for (int y = yStart; y < yEnd; y++) {
                 for (int x = 0; x < width; x++) {
                     double px = (double)x;
                     double py = (double)y;
@@ -2768,8 +2797,26 @@ PF_Err SmartRender(
                     }
                 }
             }
+            }; // end renderRows lambda
+
+            if (numThreads <= 1) {
+                renderRows(0, height);
+            } else {
+                std::vector<std::thread> threads;
+                threads.reserve(numThreads);
+                int rowsPerThread = height / numThreads;
+                int remainder = height % numThreads;
+                int yStart = 0;
+                for (int t = 0; t < numThreads; t++) {
+                    int yEnd = yStart + rowsPerThread + (t < remainder ? 1 : 0);
+                    threads.emplace_back(renderRows, yStart, yEnd);
+                    yStart = yEnd;
+                }
+                for (auto& t : threads) t.join();
+            }
+            } // end parallel block
         }
-        
+
         // Check in all parameters
         PF_CHECKIN_PARAM(in_data, &params[PARAM_MASTER_SCALE]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_GAP_WIDTH]);
