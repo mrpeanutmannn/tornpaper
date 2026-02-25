@@ -1,6 +1,6 @@
 /*
-    TornPaperEdge.cpp - Version 18
-    
+    TornPaperEdge.cpp - Version 19
+
     Realistic torn paper with fold marks that crack through the photo
     SmartRender implementation for multi-frame rendering
     - Edge Settings nested dropdown
@@ -8,6 +8,7 @@
     - Fold Advanced Settings nested
     - Removed fiber color var, side softness controls
     - Added dirt/smudge seed controls, crack angle controls
+    - v19: Fixed preview resolution scaling (downsample factor)
 */
 
 #define NOMINMAX
@@ -18,6 +19,8 @@
 #include <cmath>
 #include <algorithm>
 #include <vector>
+#include <cstdint>
+#include <thread>
 
 #ifdef min
 #undef min
@@ -174,7 +177,7 @@ PF_Err ParamsSetup(
         PF_Precision_TENTHS, 0, 0, PARAM_MASTER_SCALE);
     
     AEFX_CLR_STRUCT(def);
-    PF_ADD_FLOAT_SLIDERX("Gap Width", 0.0, 500.0, 0.0, 300.0, 35.0,
+    PF_ADD_FLOAT_SLIDERX("Gap Width", -200.0, 500.0, -200.0, 300.0, -50.0,
         PF_Precision_TENTHS, 0, 0, PARAM_GAP_WIDTH);
     
     AEFX_CLR_STRUCT(def);
@@ -236,7 +239,11 @@ PF_Err ParamsSetup(
     AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Inner Notch Depth", 0.0, 50.0, 0.0, 50.0, 2.0,
         PF_Precision_TENTHS, 0, 0, PARAM_INNER_NOTCH);
-    
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Inner Edge Expansion", 1.0, 500.0, 1.0, 500.0, 150.0,
+        PF_Precision_TENTHS, 0, 0, PARAM_INNER_EXPANSION);
+
     AEFX_CLR_STRUCT(def);
     PF_END_TOPIC(PARAM_TOPIC_INNER_END);
     
@@ -336,7 +343,10 @@ PF_Err ParamsSetup(
     
     AEFX_CLR_STRUCT(def);
     PF_ADD_TOPIC("Fibers", PARAM_TOPIC_FIBERS);
-    
+
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_CHECKBOX("Enable Fibers", "", TRUE, 0, PARAM_FIBER_ENABLE);
+
     AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Fiber Density", 0.0, 100.0, 0.0, 100.0, 28.0,
         PF_Precision_TENTHS, 0, 0, PARAM_FIBER_DENSITY);
@@ -483,7 +493,7 @@ PF_Err ParamsSetup(
     
     // Shadow A controls (side A - typically highlight/white)
     AEFX_CLR_STRUCT(def);
-    PF_ADD_FLOAT_SLIDERX("Shadow A Opacity", 0.0, 100.0, 0.0, 100.0, 25.0,
+    PF_ADD_FLOAT_SLIDERX("Shadow A Opacity", 0.0, 100.0, 0.0, 100.0, 10.0,
         PF_Precision_TENTHS, 0, 0, PARAM_FOLD_SHADOW_A_OPACITY);
     
     AEFX_CLR_STRUCT(def);
@@ -494,13 +504,13 @@ PF_Err ParamsSetup(
     PF_ADD_FLOAT_SLIDERX("Shadow A Variability", 0.0, 100.0, 0.0, 100.0, 50.0,
         PF_Precision_TENTHS, 0, 0, PARAM_FOLD_SHADOW_A_VARIABILITY);
     
-    // Shadow A Color - white (highlight)
+    // Shadow A Color - black
     AEFX_CLR_STRUCT(def);
-    PF_ADD_COLOR("Shadow A Color", 255, 255, 255, PARAM_FOLD_SHADOW_A_COLOR);
+    PF_ADD_COLOR("Shadow A Color", 0, 0, 0, PARAM_FOLD_SHADOW_A_COLOR);
     
     // Shadow B controls (side B - typically shadow/black)
     AEFX_CLR_STRUCT(def);
-    PF_ADD_FLOAT_SLIDERX("Shadow B Opacity", 0.0, 100.0, 0.0, 100.0, 25.0,
+    PF_ADD_FLOAT_SLIDERX("Shadow B Opacity", 0.0, 100.0, 0.0, 100.0, 10.0,
         PF_Precision_TENTHS, 0, 0, PARAM_FOLD_SHADOW_B_OPACITY);
     
     AEFX_CLR_STRUCT(def);
@@ -535,7 +545,7 @@ PF_Err ParamsSetup(
         PF_Precision_TENTHS, 0, 0, PARAM_DIRT_SIZE);
     
     AEFX_CLR_STRUCT(def);
-    PF_ADD_FLOAT_SLIDERX("Dirt Opacity", 0.0, 100.0, 0.0, 100.0, 70.0,
+    PF_ADD_FLOAT_SLIDERX("Dirt Opacity", 0.0, 100.0, 0.0, 100.0, 40.0,
         PF_Precision_TENTHS, 0, 0, PARAM_DIRT_OPACITY);
     
     AEFX_CLR_STRUCT(def);
@@ -554,7 +564,7 @@ PF_Err ParamsSetup(
         PF_Precision_TENTHS, 0, 0, PARAM_SMUDGE_SIZE);
     
     AEFX_CLR_STRUCT(def);
-    PF_ADD_FLOAT_SLIDERX("Smudge Opacity", 0.0, 100.0, 0.0, 100.0, 50.0,
+    PF_ADD_FLOAT_SLIDERX("Smudge Opacity", 0.0, 100.0, 0.0, 100.0, 20.0,
         PF_Precision_TENTHS, 0, 0, PARAM_SMUDGE_OPACITY);
     
     AEFX_CLR_STRUCT(def);
@@ -713,25 +723,64 @@ public:
 };
 
 // ============================================================
+// DISTANCE FIELD CACHE
+// ============================================================
+
+// FNV-1a hash of sampled alpha values — fast change detection
+static inline uint64_t hashInputAlpha(PF_EffectWorld* layer, A_long pixelBytes) {
+    uint64_t hash = 14695981039346656037ULL;
+    int w = layer->width;
+    int h = layer->height;
+    for (int y = 0; y < h; y += 8) {
+        char* rowPtr = (char*)layer->data + y * layer->rowbytes;
+        for (int x = 0; x < w; x += 8) {
+            uint32_t alpha;
+            if (pixelBytes >= 16) {
+                alpha = (uint32_t)(((PF_PixelFloat*)rowPtr)[x].alpha * 65536.0f);
+            } else if (pixelBytes >= 8) {
+                alpha = ((PF_Pixel16*)rowPtr)[x].alpha;
+            } else {
+                alpha = ((PF_Pixel8*)rowPtr)[x].alpha;
+            }
+            hash ^= alpha;
+            hash *= 1099511628211ULL;
+        }
+    }
+    hash ^= (uint64_t)w;  hash *= 1099511628211ULL;
+    hash ^= (uint64_t)h;  hash *= 1099511628211ULL;
+    return hash;
+}
+
+struct DFCache {
+    uint64_t inputHash;
+    int width, height;
+    DistanceField df;
+    DFCache() : inputHash(0), width(0), height(0), df(0, 0) {}
+};
+
+static thread_local DFCache tl_dfCache;
+
+// ============================================================
 // NOISE FUNCTIONS
 // ============================================================
 
 inline double worleyNoise(double x, double y, int seed) {
     int xi = (int)floor(x);
     int yi = (int)floor(y);
-    double minDist = 1e10;
-    
+    double minDist2 = 1e20;
+
     for (int dy = -1; dy <= 1; dy++) {
         for (int dx = -1; dx <= 1; dx++) {
             int cx = xi + dx;
             int cy = yi + dy;
             double px = cx + (double)(hash2D(cx, cy, seed) & 0xFFFF) / 65536.0;
             double py = cy + (double)(hash2D(cx, cy, seed + 1000) & 0xFFFF) / 65536.0;
-            double dist = sqrt((x - px) * (x - px) + (y - py) * (y - py));
-            if (dist < minDist) minDist = dist;
+            double ddx = x - px, ddy = y - py;
+            double dist2 = ddx * ddx + ddy * ddy;
+            if (dist2 < minDist2) minDist2 = dist2;
         }
     }
-    return minDist;
+    return sqrt(minDist2);
 }
 
 inline double ridgedMultifractal(double x, double y, int seed, int octaves) {
@@ -1398,14 +1447,19 @@ inline FiberFieldResult fiberField(
     if (fabs(edgeDist) > maxFiberDist * 2.5) return result;
     
     double cellSize = 4.0 / (density / 50.0 + 0.5);
-    
+
     int cellX = (int)floor(px / cellSize);
     int cellY = (int)floor(py / cellSize);
-    
+
+    // Scale search radius to match fiber reach instead of fixed 9x9
+    int searchRadius = (int)ceil(maxFiberDist / cellSize) + 1;
+    if (searchRadius < 2) searchRadius = 2;
+    if (searchRadius > 8) searchRadius = 8;
+
     double maxExtent = 0;
-    
-    for (int cy = cellY - 4; cy <= cellY + 4; cy++) {
-        for (int cx = cellX - 4; cx <= cellX + 4; cx++) {
+
+    for (int cy = cellY - searchRadius; cy <= cellY + searchRadius; cy++) {
+        for (int cx = cellX - searchRadius; cx <= cellX + searchRadius; cx++) {
             uint32_t cellHash = hash2D(cx, cy, seed);
             
             double prob = (cellHash & 0xFF) / 255.0;
@@ -1460,9 +1514,15 @@ PF_Err Render(
     PF_LayerDef     *output)
 {
     PF_Err err = PF_Err_NONE;
-    
-    // Basic settings
+
+    // Calculate downsample factor for preview resolution scaling
+    double downsampleX = (double)in_data->downsample_x.num / (double)in_data->downsample_x.den;
+    double downsampleY = (double)in_data->downsample_y.num / (double)in_data->downsample_y.den;
+    double downsampleFactor = (downsampleX + downsampleY) * 0.5;
+
+    // Basic settings - DON'T scale masterScale, work in full-res space
     double masterScale = params[PARAM_MASTER_SCALE]->u.fs_d.value / 100.0;
+
     double gapWidth = params[PARAM_GAP_WIDTH]->u.fs_d.value * masterScale;
     int seed = params[PARAM_RANDOM_SEED]->u.sd.value;
     double edgeSoftness = params[PARAM_EDGE_SOFTNESS]->u.fs_d.value * masterScale;
@@ -1478,7 +1538,8 @@ PF_Err Render(
     double innerRoughScale = params[PARAM_INNER_ROUGH_SCALE]->u.fs_d.value;
     double innerJaggedness = params[PARAM_INNER_JAGGEDNESS]->u.fs_d.value;
     double innerNotch = params[PARAM_INNER_NOTCH]->u.fs_d.value;
-    
+    double innerExpansion = params[PARAM_INNER_EXPANSION]->u.fs_d.value;
+
     // Middle edges
     double middle1Amount = params[PARAM_MIDDLE1_AMOUNT]->u.fs_d.value / 100.0;
     double middle1Position = params[PARAM_MIDDLE1_POSITION]->u.fs_d.value / 100.0;
@@ -1511,6 +1572,7 @@ PF_Err Render(
     double innerShadowWidth = params[PARAM_CONTENT_SHADOW_WIDTH]->u.fs_d.value * masterScale;
     
     // Fibers
+    bool fibersEnabled = params[PARAM_FIBER_ENABLE]->u.bd.value != 0;
     double fiberDensity = params[PARAM_FIBER_DENSITY]->u.fs_d.value;
     double fiberLength = params[PARAM_FIBER_LENGTH]->u.fs_d.value * masterScale;
     double fiberThickness = params[PARAM_FIBER_THICKNESS]->u.fs_d.value * masterScale;
@@ -1590,66 +1652,89 @@ PF_Err Render(
     int width = output->width;
     int height = output->height;
     
-    // Convert fold points from fixed point to pixels
+    // Convert fold points from fixed point to pixels, scaled by downsample factor
     // Fixed point format: upper 16 bits = integer, lower 16 bits = fraction
     double fp1x = (double)fold1X / 65536.0;
     double fp1y = (double)fold1Y / 65536.0;
     double fp2x = (double)fold2X / 65536.0;
     double fp2y = (double)fold2Y / 65536.0;
     
-    // Build distance field
-    DistanceField df(width, height);
-    df.buildFromLayer(input);
-    
-    // Render
-    for (int y = 0; y < height; y++) {
+    // Build distance field (cached across frames when input unchanged)
+    uint64_t dfHash = hashInputAlpha(input, 4);
+    DFCache& cache = tl_dfCache;
+    if (cache.inputHash != dfHash || cache.width != width || cache.height != height) {
+        cache.df = DistanceField(width, height);
+        cache.df.buildFromLayer(input);
+        cache.inputHash = dfHash;
+        cache.width = width;
+        cache.height = height;
+    }
+    DistanceField& df = cache.df;
+
+    // Render - parallelized across CPU cores
+    {
+    int numThreads = std::max(1, (int)std::thread::hardware_concurrency());
+    if (numThreads > height) numThreads = height;
+
+    auto renderRows = [&](int yStart, int yEnd) {
+    for (int y = yStart; y < yEnd; y++) {
         PF_Pixel8* inRow = (PF_Pixel8*)((char*)input->data + y * input->rowbytes);
         PF_Pixel8* outRow = (PF_Pixel8*)((char*)output->data + y * output->rowbytes);
-        
+
         for (int x = 0; x < width; x++) {
             double px = (double)x;
             double py = (double)y;
-            
-            float signedDist = df.getDist(x, y);
+
+            // Scale coordinates to full-resolution space for consistent noise sampling
+            double noisePx = px / downsampleFactor;
+            double noisePy = py / downsampleFactor;
+
+            // signedDist is in canvas pixels - scale to full-res space
+            float signedDistRaw = df.getDist(x, y);
+            double signedDist = signedDistRaw / downsampleFactor;
             float gradX, gradY;
             df.getGradient(x, y, gradX, gradY);
-            
+
             // Source pixel
             double srcR = inRow[x].red / 255.0;
             double srcG = inRow[x].green / 255.0;
             double srcB = inRow[x].blue / 255.0;
             double srcA = inRow[x].alpha / 255.0;
-            
-            // Edge displacements
-            double outerDisp = calcEdgeDisplacement(px, py, seed, 
+
+            // Edge displacements - use noise coordinates
+            double outerDisp = calcEdgeDisplacement(noisePx, noisePy, seed,
                 outerRoughness, outerRoughScale, outerJaggedness, outerNotch, masterScale);
-            double innerDisp = calcEdgeDisplacement(px + 1000, py + 1000, seed + 5000,
+            double innerDispRaw = calcEdgeDisplacement(noisePx + 1000, noisePy + 1000, seed + 5000,
                 innerRoughness, innerRoughScale, innerJaggedness, innerNotch, masterScale);
-            
+            // Shift inner edge based on expansion control
+            double expansionFactor = (100.0 - innerExpansion) / 50.0;
+            double innerDispMaxEstimate = (innerRoughness + innerJaggedness * 0.5 + innerNotch * 0.3) * masterScale * expansionFactor;
+            double innerDisp = innerDispRaw - innerDispMaxEstimate;
+
             double halfGap = gapWidth / 2.0;
             double outerEdge = -halfGap + outerDisp;
             double innerEdge = halfGap + innerDisp;
-            
+
             if (innerEdge < outerEdge + 2.0) {
                 double mid = (innerEdge + outerEdge) / 2.0;
                 innerEdge = mid + 1.0;
                 outerEdge = mid - 1.0;
             }
-            
+
             // Middle edges
             double middle1Edge = outerEdge;
             double middle2Edge = outerEdge;
-            
+
             if (middle1Amount > 0) {
-                double m1Disp = calcEdgeDisplacement(px + 2000, py + 2000, seed + 10000,
+                double m1Disp = calcEdgeDisplacement(noisePx + 2000, noisePy + 2000, seed + 10000,
                     middle1Roughness, 100.0, middle1Roughness * 0.2, 0, masterScale);
                 double m1Base = outerEdge + (innerEdge - outerEdge) * middle1Position;
                 middle1Edge = m1Base + m1Disp * 0.4;
                 middle1Edge = clamp(middle1Edge, outerEdge + 1.0, innerEdge - 1.0);
             }
-            
+
             if (middle2Amount > 0) {
-                double m2Disp = calcEdgeDisplacement(px + 3000, py + 3000, seed + 15000,
+                double m2Disp = calcEdgeDisplacement(noisePx + 3000, noisePy + 3000, seed + 15000,
                     middle2Roughness, 100.0, middle2Roughness * 0.2, 0, masterScale);
                 double m2Base = outerEdge + (innerEdge - outerEdge) * middle2Position;
                 middle2Edge = m2Base + m2Disp * 0.4;
@@ -1659,7 +1744,7 @@ PF_Err Render(
             // Alphas
             double softness = safeMax(0.5, edgeSoftness);
             double contentAlpha = smoothstep(innerEdge - softness, innerEdge + softness, signedDist);
-            
+
             double paperAlpha = 0.0;
             if (signedDist <= outerEdge - softness) {
                 paperAlpha = 0.0;
@@ -1674,76 +1759,83 @@ PF_Err Render(
             }
             
             // Fibers
-            FiberFieldResult outerFibers = fiberField(px, py, signedDist - outerEdge, gradX, gradY,
-                fiberDensity, fiberLength, fiberThickness, fiberSpread, 
-                fiberSoftness, fiberFeather, fiberRange, seed + 1000);
-            
-            FiberFieldResult innerFibers = fiberField(px, py, signedDist - innerEdge, -gradX, -gradY,
-                fiberDensity * 0.7, fiberLength * 0.8, fiberThickness, fiberSpread,
-                fiberSoftness, fiberFeather, fiberRange, seed + 2000);
-            
-            FiberFieldResult middle1Fibers = {0, 0, 0.5, 0};
-            FiberFieldResult middle2Fibers = {0, 0, 0.5, 0};
-            
-            if (middle1Amount > 0 && middle1FiberDensity > 0) {
-                middle1Fibers = fiberField(px, py, signedDist - middle1Edge, -gradX, -gradY,
-                    middle1FiberDensity, fiberLength * 0.6, fiberThickness, fiberSpread,
-                    fiberSoftness, fiberFeather, fiberRange * 0.5, seed + 3000);
-                middle1Fibers.opacity *= middle1Amount;
-                middle1Fibers.shadowOpacity *= middle1Amount;
-            }
-            
-            if (middle2Amount > 0 && middle2FiberDensity > 0) {
-                middle2Fibers = fiberField(px, py, signedDist - middle2Edge, -gradX, -gradY,
-                    middle2FiberDensity, fiberLength * 0.6, fiberThickness, fiberSpread,
-                    fiberSoftness, fiberFeather, fiberRange * 0.5, seed + 4000);
-                middle2Fibers.opacity *= middle2Amount;
-                middle2Fibers.shadowOpacity *= middle2Amount;
-            }
-            
-            double fiberAlpha = safeMax(safeMax(outerFibers.opacity, innerFibers.opacity),
-                                        safeMax(middle1Fibers.opacity, middle2Fibers.opacity));
-            fiberAlpha *= fiberOpacity;
-            
-            double fiberShadowAlpha = safeMax(safeMax(outerFibers.shadowOpacity, innerFibers.shadowOpacity),
-                                              safeMax(middle1Fibers.shadowOpacity, middle2Fibers.shadowOpacity));
-            fiberShadowAlpha *= fiberOpacity;
-            
+            double fiberAlpha = 0.0;
+            double fiberShadowAlpha = 0.0;
             double fiberColorVariation = 0.5;
-            double maxFiberOp = fiberAlpha / safeMax(0.001, fiberOpacity);
-            if (outerFibers.opacity >= maxFiberOp - 0.01) fiberColorVariation = outerFibers.colorVar;
-            else if (innerFibers.opacity >= maxFiberOp - 0.01) fiberColorVariation = innerFibers.colorVar;
-            
-            if (fiberBlur > 0 && fiberAlpha > 0) {
-                double blurFactor = 1.0 / (1.0 + fiberBlur * 0.2);
-                fiberAlpha *= blurFactor;
-                fiberShadowAlpha *= blurFactor;
+            FiberFieldResult outerFibers = {0, 0, 0.5, 0};
+
+            if (fibersEnabled) {
+                outerFibers = fiberField(px, py, signedDist - outerEdge, gradX, gradY,
+                    fiberDensity, fiberLength, fiberThickness, fiberSpread,
+                    fiberSoftness, fiberFeather, fiberRange, seed + 1000);
+
+                FiberFieldResult innerFibers = fiberField(px, py, signedDist - innerEdge, -gradX, -gradY,
+                    fiberDensity * 0.7, fiberLength * 0.8, fiberThickness, fiberSpread,
+                    fiberSoftness, fiberFeather, fiberRange, seed + 2000);
+
+                FiberFieldResult middle1Fibers = {0, 0, 0.5, 0};
+                FiberFieldResult middle2Fibers = {0, 0, 0.5, 0};
+
+                if (middle1Amount > 0 && middle1FiberDensity > 0) {
+                    middle1Fibers = fiberField(px, py, signedDist - middle1Edge, -gradX, -gradY,
+                        middle1FiberDensity, fiberLength * 0.6, fiberThickness, fiberSpread,
+                        fiberSoftness, fiberFeather, fiberRange * 0.5, seed + 3000);
+                    middle1Fibers.opacity *= middle1Amount;
+                    middle1Fibers.shadowOpacity *= middle1Amount;
+                }
+
+                if (middle2Amount > 0 && middle2FiberDensity > 0) {
+                    middle2Fibers = fiberField(px, py, signedDist - middle2Edge, -gradX, -gradY,
+                        middle2FiberDensity, fiberLength * 0.6, fiberThickness, fiberSpread,
+                        fiberSoftness, fiberFeather, fiberRange * 0.5, seed + 4000);
+                    middle2Fibers.opacity *= middle2Amount;
+                    middle2Fibers.shadowOpacity *= middle2Amount;
+                }
+
+                fiberAlpha = safeMax(safeMax(outerFibers.opacity, innerFibers.opacity),
+                                            safeMax(middle1Fibers.opacity, middle2Fibers.opacity));
+                fiberAlpha *= fiberOpacity;
+
+                fiberShadowAlpha = safeMax(safeMax(outerFibers.shadowOpacity, innerFibers.shadowOpacity),
+                                                  safeMax(middle1Fibers.shadowOpacity, middle2Fibers.shadowOpacity));
+                fiberShadowAlpha *= fiberOpacity;
+
+                double maxFiberOp = fiberAlpha / safeMax(0.001, fiberOpacity);
+                if (outerFibers.opacity >= maxFiberOp - 0.01) fiberColorVariation = outerFibers.colorVar;
+                else if (innerFibers.opacity >= maxFiberOp - 0.01) fiberColorVariation = innerFibers.colorVar;
+
+                if (fiberBlur > 0 && fiberAlpha > 0) {
+                    double blurFactor = 1.0 / (1.0 + fiberBlur * 0.2);
+                    fiberAlpha *= blurFactor;
+                    fiberShadowAlpha *= blurFactor;
+                }
             }
-            
+
             double totalPaperAlpha = safeMax(paperAlpha, fiberAlpha);
-            
-            // Paper backing color with texture
-            double backingR = paperBaseR;
-            double backingG = paperBaseG;
-            double backingB = paperBaseB;
-            
+
+            // Compute paper texture once and reuse for both backing and paper color
+            double paperTex = 0.0;
+            double paperTexBlue = 0.0;
             if (paperTexture > 0) {
                 double texScale = 3.0 * masterScale;
                 double grain1 = fbm2D(px / texScale, py / texScale, seed + 7000, 3, 0.5);
                 double grain2 = valueNoise2D(px / (texScale * 0.5), py / (texScale * 0.5), seed + 8000);
                 double streaks = fbm2D(px / (texScale * 0.67), py / (texScale * 5.0), seed + 9000, 2, 0.6);
-                
+
                 double tex = grain1 * 0.5 + grain2 * 0.3 + streaks * 0.2;
                 tex = (tex - 0.5) * paperTexture * 0.15;
-                
-                backingR = clamp01(backingR + tex);
-                backingG = clamp01(backingG + tex);
-                backingB = clamp01(backingB + tex * 0.9);
+                paperTex = tex;
+                paperTexBlue = tex * 0.9;
             }
-            
+
+            // Paper backing color with texture
+            double backingR = clamp01(paperBaseR + paperTex);
+            double backingG = clamp01(paperBaseG + paperTex);
+            double backingB = clamp01(paperBaseB + paperTexBlue);
+
             // Paper color
             double paperR = paperBaseR, paperG = paperBaseG, paperB = paperBaseB;
-            
+
             if (totalPaperAlpha > 0.01) {
                 if (fiberShadow > 0 && fiberShadowAlpha > 0.01) {
                     double shadowStr = fiberShadowAlpha * fiberShadow * 0.4;
@@ -1751,31 +1843,23 @@ PF_Err Render(
                     paperG *= (1.0 - shadowStr);
                     paperB *= (1.0 - shadowStr * 0.8);
                 }
-                
+
                 if (fiberAlpha > 0.05) {
                     double colorShift = (fiberColorVariation - 0.5) * fiberColorVar * 0.25;
                     double fR = fiberBaseR * (1.0 + colorShift * 0.3);
                     double fG = fiberBaseG * (1.0 + colorShift * 0.2);
                     double fB = fiberBaseB * (1.0 + colorShift * 0.1);
-                    
+
                     double fiberBlend = fiberAlpha * 0.6;
                     paperR = paperR * (1.0 - fiberBlend) + clamp01(fR) * fiberBlend;
                     paperG = paperG * (1.0 - fiberBlend) + clamp01(fG) * fiberBlend;
                     paperB = paperB * (1.0 - fiberBlend) + clamp01(fB) * fiberBlend;
                 }
-                
+
                 if (paperTexture > 0) {
-                    double texScale = 3.0 * masterScale;
-                    double grain1 = fbm2D(px / texScale, py / texScale, seed + 7000, 3, 0.5);
-                    double grain2 = valueNoise2D(px / (texScale * 0.5), py / (texScale * 0.5), seed + 8000);
-                    double streaks = fbm2D(px / (texScale * 0.67), py / (texScale * 5.0), seed + 9000, 2, 0.6);
-                    
-                    double tex = grain1 * 0.5 + grain2 * 0.3 + streaks * 0.2;
-                    tex = (tex - 0.5) * paperTexture * 0.15;
-                    
-                    paperR = clamp01(paperR + tex);
-                    paperG = clamp01(paperG + tex);
-                    paperB = clamp01(paperB + tex * 0.9);
+                    paperR = clamp01(paperR + paperTex);
+                    paperG = clamp01(paperG + paperTex);
+                    paperB = clamp01(paperB + paperTexBlue);
                 }
                 
                 // Middle shadows
@@ -1946,7 +2030,25 @@ PF_Err Render(
             outRow[x].blue  = (A_u_char)(clamp01(finalB) * finalA * 255.0);
         }
     }
-    
+    }; // end renderRows lambda
+
+    if (numThreads <= 1) {
+        renderRows(0, height);
+    } else {
+        std::vector<std::thread> threads;
+        threads.reserve(numThreads);
+        int rowsPerThread = height / numThreads;
+        int remainder = height % numThreads;
+        int yStart = 0;
+        for (int t = 0; t < numThreads; t++) {
+            int yEnd = yStart + rowsPerThread + (t < remainder ? 1 : 0);
+            threads.emplace_back(renderRows, yStart, yEnd);
+            yStart = yEnd;
+        }
+        for (auto& t : threads) t.join();
+    }
+    } // end parallel block
+
     return err;
 }
 
@@ -2062,6 +2164,7 @@ PF_Err SmartRender(
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_INNER_ROUGH_SCALE, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_INNER_ROUGH_SCALE]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_INNER_JAGGEDNESS, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_INNER_JAGGEDNESS]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_INNER_NOTCH, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_INNER_NOTCH]));
+        ERR(PF_CHECKOUT_PARAM(in_data, PARAM_INNER_EXPANSION, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_INNER_EXPANSION]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_MIDDLE1_AMOUNT, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_MIDDLE1_AMOUNT]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_MIDDLE1_POSITION, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_MIDDLE1_POSITION]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_MIDDLE1_ROUGHNESS, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_MIDDLE1_ROUGHNESS]));
@@ -2079,6 +2182,7 @@ PF_Err SmartRender(
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_FIBER_COLOR, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_FIBER_COLOR]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_CONTENT_SHADOW_AMOUNT, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_CONTENT_SHADOW_AMOUNT]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_CONTENT_SHADOW_WIDTH, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_CONTENT_SHADOW_WIDTH]));
+        ERR(PF_CHECKOUT_PARAM(in_data, PARAM_FIBER_ENABLE, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_FIBER_ENABLE]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_FIBER_DENSITY, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_FIBER_DENSITY]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_FIBER_LENGTH, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_FIBER_LENGTH]));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_FIBER_THICKNESS, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_FIBER_THICKNESS]));
@@ -2137,8 +2241,17 @@ PF_Err SmartRender(
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_DUST_COLOR, in_data->current_time, in_data->time_step, in_data->time_scale, &params[PARAM_DUST_COLOR]));
         
         if (!err) {
+            // Calculate downsample factor for preview resolution scaling
+            // At full res: num=1, den=1 -> factor=1.0
+            // At half res: num=1, den=2 -> factor=0.5
+            double downsampleX = (double)in_data->downsample_x.num / (double)in_data->downsample_x.den;
+            double downsampleY = (double)in_data->downsample_y.num / (double)in_data->downsample_y.den;
+            double downsampleFactor = (downsampleX + downsampleY) * 0.5;  // Average of X and Y
+
             // Extract parameter values
+            // DON'T scale masterScale - we work in full-res coordinate space
             double masterScale = params[PARAM_MASTER_SCALE].u.fs_d.value / 100.0;
+
             double gapWidth = params[PARAM_GAP_WIDTH].u.fs_d.value * masterScale;
             int seed = params[PARAM_RANDOM_SEED].u.sd.value;
             double edgeSoftness = params[PARAM_EDGE_SOFTNESS].u.fs_d.value * masterScale;
@@ -2152,7 +2265,8 @@ PF_Err SmartRender(
             double innerRoughScale = params[PARAM_INNER_ROUGH_SCALE].u.fs_d.value;
             double innerJaggedness = params[PARAM_INNER_JAGGEDNESS].u.fs_d.value;
             double innerNotch = params[PARAM_INNER_NOTCH].u.fs_d.value;
-            
+            double innerExpansion = params[PARAM_INNER_EXPANSION].u.fs_d.value;
+
             double middle1Amount = params[PARAM_MIDDLE1_AMOUNT].u.fs_d.value / 100.0;
             double middle1Position = params[PARAM_MIDDLE1_POSITION].u.fs_d.value / 100.0;
             double middle1Roughness = params[PARAM_MIDDLE1_ROUGHNESS].u.fs_d.value;
@@ -2182,6 +2296,7 @@ PF_Err SmartRender(
             double innerShadowAmount = params[PARAM_CONTENT_SHADOW_AMOUNT].u.fs_d.value / 100.0;
             double innerShadowWidth = params[PARAM_CONTENT_SHADOW_WIDTH].u.fs_d.value * masterScale;
             
+            bool fibersEnabled = params[PARAM_FIBER_ENABLE].u.bd.value != 0;
             double fiberDensity = params[PARAM_FIBER_DENSITY].u.fs_d.value;
             double fiberLength = params[PARAM_FIBER_LENGTH].u.fs_d.value * masterScale;
             double fiberThickness = params[PARAM_FIBER_THICKNESS].u.fs_d.value * masterScale;
@@ -2201,6 +2316,7 @@ PF_Err SmartRender(
             A_long fold2Y = params[PARAM_FOLD_POINT2].u.td.y_value;
             double foldLineRoughness = params[PARAM_FOLD_LINE_ROUGHNESS].u.fs_d.value;
             double foldLineRoughScale = params[PARAM_FOLD_LINE_ROUGH_SCALE].u.fs_d.value;
+            // These pixel values are used in noise-coordinate space (full resolution)
             double foldLineWidth = params[PARAM_FOLD_LINE_WIDTH].u.fs_d.value;
             double foldSideAWidth = params[PARAM_FOLD_SIDE_A_WIDTH].u.fs_d.value;
             double foldSideARoughness = params[PARAM_FOLD_SIDE_A_ROUGHNESS].u.fs_d.value;
@@ -2262,61 +2378,65 @@ PF_Err SmartRender(
             double fp2x = (double)fold2X / 65536.0;
             double fp2y = (double)fold2Y / 65536.0;
             
-            // Build distance field from input
-            // Need to handle different pixel formats for distance field too
-            DistanceField df(input->width, input->height);
-            
             // Determine bit depth properly
-            // PF_WORLD_IS_DEEP checks for 16-bit
-            // For 32-bit float, we need to check world_flags for specific flag
             bool is16bit = PF_WORLD_IS_DEEP(output) ? true : false;
             bool isFloat = false;
-            
-            // Check if 32-bit float by looking at actual bytes per pixel
-            // 8-bit: 4 bytes per pixel (but rowbytes may have padding)
-            // 16-bit: 8 bytes per pixel  
-            // 32-bit float: 16 bytes per pixel
-            // Use a more reliable check - if not 16-bit deep, check if rowbytes suggests float
             if (!is16bit) {
-                // Minimum bytes needed for the row without padding
-                A_long minRowBytes8 = output->width * 4;   // 8-bit ARGB
-                A_long minRowBytes32 = output->width * 16; // 32-bit float ARGB
-                
-                // If rowbytes is large enough for float, it's probably float
+                A_long minRowBytes32 = output->width * 16;
                 if (output->rowbytes >= minRowBytes32) {
                     isFloat = true;
                 }
             }
-            
-            // Determine pixel size for array indexing
-            int pixelSize = 4;  // Default 8-bit (4 bytes)
+            int pixelSize = 4;
             if (isFloat) {
-                pixelSize = 16;  // 32-bit float (16 bytes)
+                pixelSize = 16;
             } else if (is16bit) {
-                pixelSize = 8;   // 16-bit (8 bytes)
+                pixelSize = 8;
             }
-            
-            // Build distance field
-            df.buildFromLayerGeneric(input, pixelSize);
-            
-            // Render to output based on format
-            for (int y = 0; y < height; y++) {
+
+            // Build distance field (cached across frames when input unchanged)
+            int dfW = input->width, dfH = input->height;
+            uint64_t dfHash = hashInputAlpha(input, pixelSize);
+            DFCache& cache = tl_dfCache;
+            if (cache.inputHash != dfHash || cache.width != dfW || cache.height != dfH) {
+                cache.df = DistanceField(dfW, dfH);
+                cache.df.buildFromLayerGeneric(input, pixelSize);
+                cache.inputHash = dfHash;
+                cache.width = dfW;
+                cache.height = dfH;
+            }
+            DistanceField& df = cache.df;
+
+            // Render to output based on format - parallelized across CPU cores
+            {
+            int numThreads = std::max(1, (int)std::thread::hardware_concurrency());
+            if (numThreads > height) numThreads = height;
+
+            auto renderRows = [&](int yStart, int yEnd) {
+            for (int y = yStart; y < yEnd; y++) {
                 for (int x = 0; x < width; x++) {
                     double px = (double)x;
                     double py = (double)y;
-                    
+
+                    // Scale coordinates to full-resolution space for consistent noise sampling
+                    // At half res, pixel 50 should sample same noise as pixel 100 at full res
+                    double noisePx = px / downsampleFactor;
+                    double noisePy = py / downsampleFactor;
+
                     // Map output coords to input coords (handle expansion)
                     int inX = x;
                     int inY = y;
-                    
+
                     // Get distance field values (clamp to input bounds)
                     int dfX = safeMax(0, safeMin(input->width - 1, inX));
                     int dfY = safeMax(0, safeMin(input->height - 1, inY));
-                    
-                    float signedDist = df.getDist(dfX, dfY);
+
+                    // signedDist is in canvas pixels - scale to full-res space
+                    float signedDistRaw = df.getDist(dfX, dfY);
+                    double signedDist = signedDistRaw / downsampleFactor;
                     float gradX, gradY;
                     df.getGradient(dfX, dfY, gradX, gradY);
-                    
+
                     // Get source pixel (with bounds check) - normalized to 0.0-1.0
                     double srcR = 0, srcG = 0, srcB = 0, srcA = 0;
                     if (inX >= 0 && inX < input->width && inY >= 0 && inY < input->height) {
@@ -2343,47 +2463,55 @@ PF_Err SmartRender(
                             srcA = inRow[inX].alpha / 255.0;
                         }
                     }
-                    
-                    // Edge displacements
-                    double outerDisp = calcEdgeDisplacement(px, py, seed, 
+
+                    // Edge displacements - use noise coordinates for consistency
+                    // masterScale is already scaled for pixel sizes, noisePx/noisePy for noise
+                    double outerDisp = calcEdgeDisplacement(noisePx, noisePy, seed,
                         outerRoughness, outerRoughScale, outerJaggedness, outerNotch, masterScale);
-                    double innerDisp = calcEdgeDisplacement(px + 1000, py + 1000, seed + 5000,
+                    double innerDispRaw = calcEdgeDisplacement(noisePx + 1000, noisePy + 1000, seed + 5000,
                         innerRoughness, innerRoughScale, innerJaggedness, innerNotch, masterScale);
-                    
+                    // Shift inner edge based on expansion control
+                    // expansion=100: no shift (innerDisp = innerDispRaw)
+                    // expansion=50: current behavior (small shift)
+                    // expansion=1: maximum shift inward
+                    double expansionFactor = (100.0 - innerExpansion) / 50.0;  // 0 at 100, 1 at 50, ~2 at 1
+                    double innerDispMaxEstimate = (innerRoughness + innerJaggedness * 0.5 + innerNotch * 0.3) * masterScale * expansionFactor;
+                    double innerDisp = innerDispRaw - innerDispMaxEstimate;
+
                     double halfGap = gapWidth / 2.0;
                     double outerEdge = -halfGap + outerDisp;
                     double innerEdge = halfGap + innerDisp;
-                    
+
                     if (innerEdge < outerEdge + 2.0) {
                         double mid = (innerEdge + outerEdge) / 2.0;
                         innerEdge = mid + 1.0;
                         outerEdge = mid - 1.0;
                     }
-                    
+
                     // Middle edges
                     double middle1Edge = outerEdge;
                     double middle2Edge = outerEdge;
-                    
+
                     if (middle1Amount > 0) {
-                        double m1Disp = calcEdgeDisplacement(px + 2000, py + 2000, seed + 10000,
+                        double m1Disp = calcEdgeDisplacement(noisePx + 2000, noisePy + 2000, seed + 10000,
                             middle1Roughness, 100.0, middle1Roughness * 0.2, 0, masterScale);
                         double m1Base = outerEdge + (innerEdge - outerEdge) * middle1Position;
                         middle1Edge = m1Base + m1Disp * 0.4;
                         middle1Edge = clamp(middle1Edge, outerEdge + 1.0, innerEdge - 1.0);
                     }
-                    
+
                     if (middle2Amount > 0) {
-                        double m2Disp = calcEdgeDisplacement(px + 3000, py + 3000, seed + 15000,
+                        double m2Disp = calcEdgeDisplacement(noisePx + 3000, noisePy + 3000, seed + 15000,
                             middle2Roughness, 100.0, middle2Roughness * 0.2, 0, masterScale);
                         double m2Base = outerEdge + (innerEdge - outerEdge) * middle2Position;
                         middle2Edge = m2Base + m2Disp * 0.4;
                         middle2Edge = clamp(middle2Edge, outerEdge + 1.0, innerEdge - 1.0);
                     }
-                    
+
                     // Alphas
                     double softness = safeMax(0.5, edgeSoftness);
                     double contentAlpha = smoothstep(innerEdge - softness, innerEdge + softness, signedDist);
-                    
+
                     double paperAlpha = 0.0;
                     if (signedDist <= outerEdge - softness) {
                         paperAlpha = 0.0;
@@ -2396,78 +2524,85 @@ PF_Err SmartRender(
                     } else {
                         paperAlpha = 1.0 - smoothstep(innerEdge - softness, innerEdge + softness, signedDist);
                     }
-                    
-                    // Fibers
-                    FiberFieldResult outerFibers = fiberField(px, py, signedDist - outerEdge, gradX, gradY,
-                        fiberDensity, fiberLength, fiberThickness, fiberSpread, 
-                        fiberSoftness, fiberFeather, fiberRange, seed + 1000);
-                    
-                    FiberFieldResult innerFibers = fiberField(px, py, signedDist - innerEdge, -gradX, -gradY,
-                        fiberDensity * 0.7, fiberLength * 0.8, fiberThickness, fiberSpread,
-                        fiberSoftness, fiberFeather, fiberRange, seed + 2000);
-                    
-                    FiberFieldResult middle1Fibers = {0, 0, 0.5, 0};
-                    FiberFieldResult middle2Fibers = {0, 0, 0.5, 0};
-                    
-                    if (middle1Amount > 0 && middle1FiberDensity > 0) {
-                        middle1Fibers = fiberField(px, py, signedDist - middle1Edge, -gradX, -gradY,
-                            middle1FiberDensity, fiberLength * 0.6, fiberThickness, fiberSpread,
-                            fiberSoftness, fiberFeather, fiberRange * 0.5, seed + 3000);
-                        middle1Fibers.opacity *= middle1Amount;
-                        middle1Fibers.shadowOpacity *= middle1Amount;
-                    }
-                    
-                    if (middle2Amount > 0 && middle2FiberDensity > 0) {
-                        middle2Fibers = fiberField(px, py, signedDist - middle2Edge, -gradX, -gradY,
-                            middle2FiberDensity, fiberLength * 0.6, fiberThickness, fiberSpread,
-                            fiberSoftness, fiberFeather, fiberRange * 0.5, seed + 4000);
-                        middle2Fibers.opacity *= middle2Amount;
-                        middle2Fibers.shadowOpacity *= middle2Amount;
-                    }
-                    
-                    double fiberAlpha = safeMax(safeMax(outerFibers.opacity, innerFibers.opacity),
-                                                safeMax(middle1Fibers.opacity, middle2Fibers.opacity));
-                    fiberAlpha *= fiberOpacity;
-                    
-                    double fiberShadowAlpha = safeMax(safeMax(outerFibers.shadowOpacity, innerFibers.shadowOpacity),
-                                                      safeMax(middle1Fibers.shadowOpacity, middle2Fibers.shadowOpacity));
-                    fiberShadowAlpha *= fiberOpacity;
-                    
+
+                    // Fibers - use noise coordinates for consistency
+                    double fiberAlpha = 0.0;
+                    double fiberShadowAlpha = 0.0;
                     double fiberColorVariation = 0.5;
-                    double maxFiberOp = fiberAlpha / safeMax(0.001, fiberOpacity);
-                    if (outerFibers.opacity >= maxFiberOp - 0.01) fiberColorVariation = outerFibers.colorVar;
-                    else if (innerFibers.opacity >= maxFiberOp - 0.01) fiberColorVariation = innerFibers.colorVar;
-                    
-                    if (fiberBlur > 0 && fiberAlpha > 0) {
-                        double blurFactor = 1.0 / (1.0 + fiberBlur * 0.2);
-                        fiberAlpha *= blurFactor;
-                        fiberShadowAlpha *= blurFactor;
+                    FiberFieldResult outerFibers = {0, 0, 0.5, 0};
+
+                    if (fibersEnabled) {
+                        outerFibers = fiberField(noisePx, noisePy, signedDist - outerEdge, gradX, gradY,
+                            fiberDensity, fiberLength, fiberThickness, fiberSpread,
+                            fiberSoftness, fiberFeather, fiberRange, seed + 1000);
+
+                        FiberFieldResult innerFibers = fiberField(noisePx, noisePy, signedDist - innerEdge, -gradX, -gradY,
+                            fiberDensity * 0.7, fiberLength * 0.8, fiberThickness, fiberSpread,
+                            fiberSoftness, fiberFeather, fiberRange, seed + 2000);
+
+                        FiberFieldResult middle1Fibers = {0, 0, 0.5, 0};
+                        FiberFieldResult middle2Fibers = {0, 0, 0.5, 0};
+
+                        if (middle1Amount > 0 && middle1FiberDensity > 0) {
+                            middle1Fibers = fiberField(noisePx, noisePy, signedDist - middle1Edge, -gradX, -gradY,
+                                middle1FiberDensity, fiberLength * 0.6, fiberThickness, fiberSpread,
+                                fiberSoftness, fiberFeather, fiberRange * 0.5, seed + 3000);
+                            middle1Fibers.opacity *= middle1Amount;
+                            middle1Fibers.shadowOpacity *= middle1Amount;
+                        }
+
+                        if (middle2Amount > 0 && middle2FiberDensity > 0) {
+                            middle2Fibers = fiberField(noisePx, noisePy, signedDist - middle2Edge, -gradX, -gradY,
+                                middle2FiberDensity, fiberLength * 0.6, fiberThickness, fiberSpread,
+                                fiberSoftness, fiberFeather, fiberRange * 0.5, seed + 4000);
+                            middle2Fibers.opacity *= middle2Amount;
+                            middle2Fibers.shadowOpacity *= middle2Amount;
+                        }
+
+                        fiberAlpha = safeMax(safeMax(outerFibers.opacity, innerFibers.opacity),
+                                                    safeMax(middle1Fibers.opacity, middle2Fibers.opacity));
+                        fiberAlpha *= fiberOpacity;
+
+                        fiberShadowAlpha = safeMax(safeMax(outerFibers.shadowOpacity, innerFibers.shadowOpacity),
+                                                          safeMax(middle1Fibers.shadowOpacity, middle2Fibers.shadowOpacity));
+                        fiberShadowAlpha *= fiberOpacity;
+
+                        double maxFiberOp = fiberAlpha / safeMax(0.001, fiberOpacity);
+                        if (outerFibers.opacity >= maxFiberOp - 0.01) fiberColorVariation = outerFibers.colorVar;
+                        else if (innerFibers.opacity >= maxFiberOp - 0.01) fiberColorVariation = innerFibers.colorVar;
+
+                        if (fiberBlur > 0 && fiberAlpha > 0) {
+                            double blurFactor = 1.0 / (1.0 + fiberBlur * 0.2);
+                            fiberAlpha *= blurFactor;
+                            fiberShadowAlpha *= blurFactor;
+                        }
                     }
-                    
+
                     double totalPaperAlpha = safeMax(paperAlpha, fiberAlpha);
-                    
-                    // Paper backing color with texture
-                    double backingR = paperBaseR;
-                    double backingG = paperBaseG;
-                    double backingB = paperBaseB;
-                    
+
+                    // Compute paper texture once and reuse for both backing and paper color
+                    double paperTex = 0.0;
+                    double paperTexBlue = 0.0;
                     if (paperTexture > 0) {
-                        double texScale = 3.0 * masterScale;
-                        double grain1 = fbm2D(px / texScale, py / texScale, seed + 7000, 3, 0.5);
-                        double grain2 = valueNoise2D(px / (texScale * 0.5), py / (texScale * 0.5), seed + 8000);
-                        double streaks = fbm2D(px / (texScale * 0.67), py / (texScale * 5.0), seed + 9000, 2, 0.6);
-                        
+                        double texScale = 3.0 * masterScale / downsampleFactor;
+                        double grain1 = fbm2D(noisePx / texScale, noisePy / texScale, seed + 7000, 3, 0.5);
+                        double grain2 = valueNoise2D(noisePx / (texScale * 0.5), noisePy / (texScale * 0.5), seed + 8000);
+                        double streaks = fbm2D(noisePx / (texScale * 0.67), noisePy / (texScale * 5.0), seed + 9000, 2, 0.6);
+
                         double tex = grain1 * 0.5 + grain2 * 0.3 + streaks * 0.2;
                         tex = (tex - 0.5) * paperTexture * 0.15;
-                        
-                        backingR = clamp01(backingR + tex);
-                        backingG = clamp01(backingG + tex);
-                        backingB = clamp01(backingB + tex * 0.9);
+                        paperTex = tex;
+                        paperTexBlue = tex * 0.9;
                     }
-                    
-                    // Paper color (simplified for SmartRender - full version in Render())
+
+                    // Paper backing color with texture
+                    double backingR = clamp01(paperBaseR + paperTex);
+                    double backingG = clamp01(paperBaseG + paperTex);
+                    double backingB = clamp01(paperBaseB + paperTexBlue);
+
+                    // Paper color
                     double paperR = paperBaseR, paperG = paperBaseG, paperB = paperBaseB;
-                    
+
                     if (totalPaperAlpha > 0.01) {
                         if (fiberShadow > 0 && fiberShadowAlpha > 0.01) {
                             double shadowStr = fiberShadowAlpha * fiberShadow * 0.4;
@@ -2475,34 +2610,81 @@ PF_Err SmartRender(
                             paperG *= (1.0 - shadowStr);
                             paperB *= (1.0 - shadowStr * 0.8);
                         }
-                        
+
                         if (fiberAlpha > 0.05) {
                             double colorShift = (fiberColorVariation - 0.5) * fiberColorVar * 0.25;
                             double fR = fiberBaseR * (1.0 + colorShift * 0.3);
                             double fG = fiberBaseG * (1.0 + colorShift * 0.2);
                             double fB = fiberBaseB * (1.0 + colorShift * 0.1);
-                            
+
                             double fiberBlend = fiberAlpha * 0.6;
                             paperR = paperR * (1.0 - fiberBlend) + clamp01(fR) * fiberBlend;
                             paperG = paperG * (1.0 - fiberBlend) + clamp01(fG) * fiberBlend;
                             paperB = paperB * (1.0 - fiberBlend) + clamp01(fB) * fiberBlend;
                         }
-                        
+
                         if (paperTexture > 0) {
-                            double texScale = 3.0 * masterScale;
-                            double grain1 = fbm2D(px / texScale, py / texScale, seed + 7000, 3, 0.5);
-                            double grain2 = valueNoise2D(px / (texScale * 0.5), py / (texScale * 0.5), seed + 8000);
-                            double streaks = fbm2D(px / (texScale * 0.67), py / (texScale * 5.0), seed + 9000, 2, 0.6);
-                            
-                            double tex = grain1 * 0.5 + grain2 * 0.3 + streaks * 0.2;
-                            tex = (tex - 0.5) * paperTexture * 0.15;
-                            
-                            paperR = clamp01(paperR + tex);
-                            paperG = clamp01(paperG + tex);
-                            paperB = clamp01(paperB + tex * 0.9);
+                            paperR = clamp01(paperR + paperTex);
+                            paperG = clamp01(paperG + paperTex);
+                            paperB = clamp01(paperB + paperTexBlue);
+                        }
+
+                        // Middle shadows
+                        if (middle1Amount > 0 && middle1Shadow > 0) {
+                            double distFromMiddle1 = middle1Edge - signedDist;
+                            double m1ShadowWidth = shadowWidth * 0.4;
+                            if (distFromMiddle1 > 0 && distFromMiddle1 < m1ShadowWidth) {
+                                double shadowFactor = 1.0 - (distFromMiddle1 / m1ShadowWidth);
+                                shadowFactor = shadowFactor * shadowFactor;
+                                double shadow = shadowFactor * middle1Shadow * middle1Amount * 0.35;
+                                paperR *= (1.0 - shadow);
+                                paperG *= (1.0 - shadow);
+                                paperB *= (1.0 - shadow * 0.8);
+                            }
+                        }
+
+                        if (middle2Amount > 0 && middle2Shadow > 0) {
+                            double distFromMiddle2 = middle2Edge - signedDist;
+                            double m2ShadowWidth = shadowWidth * 0.4;
+                            if (distFromMiddle2 > 0 && distFromMiddle2 < m2ShadowWidth) {
+                                double shadowFactor = 1.0 - (distFromMiddle2 / m2ShadowWidth);
+                                shadowFactor = shadowFactor * shadowFactor;
+                                double shadow = shadowFactor * middle2Shadow * middle2Amount * 0.35;
+                                paperR *= (1.0 - shadow);
+                                paperG *= (1.0 - shadow);
+                                paperB *= (1.0 - shadow * 0.8);
+                            }
+                        }
+
+                        // Outer shadow
+                        if (shadowAmount > 0) {
+                            double fiberExtent = outerFibers.maxExtent;
+                            double shadowStart = outerEdge + fiberExtent;
+                            double distFromShadowStart = signedDist - shadowStart;
+                            if (distFromShadowStart > 0 && distFromShadowStart < shadowWidth) {
+                                double shadowFactor = 1.0 - (distFromShadowStart / shadowWidth);
+                                shadowFactor = shadowFactor * shadowFactor;
+                                double shadow = shadowFactor * shadowAmount * 0.4;
+                                paperR *= (1.0 - shadow);
+                                paperG *= (1.0 - shadow);
+                                paperB *= (1.0 - shadow * 0.8);
+                            }
+                        }
+
+                        // Inner shadow
+                        if (innerShadowAmount > 0) {
+                            double distFromInner = innerEdge - signedDist;
+                            if (distFromInner > 0 && distFromInner < innerShadowWidth) {
+                                double shadowFactor = 1.0 - (distFromInner / innerShadowWidth);
+                                shadowFactor = shadowFactor * shadowFactor;
+                                double shadow = shadowFactor * innerShadowAmount * 0.5;
+                                paperR *= (1.0 - shadow);
+                                paperG *= (1.0 - shadow);
+                                paperB *= (1.0 - shadow * 0.8);
+                            }
                         }
                     }
-                    
+
                     // Composite
                     double finalR, finalG, finalB, finalA;
                     
@@ -2519,10 +2701,13 @@ PF_Err SmartRender(
                             finalA = 1.0;
                         }
                         
-                        // Apply fold mark
+                        // Apply fold mark - use noise coordinates
                         if (foldAmount > 0) {
                             double crackStrength, foldShadowAStr, foldShadowBStr;
-                            foldCrease(px, py, seed + 50000, fp1x, fp1y, fp2x, fp2y,
+                            // fp1/fp2 are in full-res space, so divide by downsampleFactor to match noisePx/noisePy
+                            foldCrease(noisePx, noisePy, seed + 50000,
+                                fp1x / downsampleFactor, fp1y / downsampleFactor,
+                                fp2x / downsampleFactor, fp2y / downsampleFactor,
                                 foldLineRoughness, foldLineRoughScale, foldLineWidth,
                                 foldSideAWidth, foldSideARoughness, foldSideARoughScale, foldSideAJagged, foldSideASoftness,
                                 foldSideBWidth, foldSideBRoughness, foldSideBRoughScale, foldSideBJagged, foldSideBSoftness,
@@ -2566,23 +2751,23 @@ PF_Err SmartRender(
                         
                         // Apply grunge
                         if (dirtAmount > 0) {
-                            double dirt = organicDirt(px, py, dirtSeed, dirtSize, dirtAmount, masterScale);
+                            double dirt = organicDirt(noisePx, noisePy, dirtSeed, dirtSize, dirtAmount, masterScale);
                             double dirtStr = dirt * dirtOpacity;
                             finalR = finalR * (1.0 - dirtStr) + dirtR * dirtStr;
                             finalG = finalG * (1.0 - dirtStr) + dirtG * dirtStr;
                             finalB = finalB * (1.0 - dirtStr) + dirtB * dirtStr;
                         }
-                        
+
                         if (smudgeAmount > 0) {
-                            double smudge = organicSmudge(px, py, smudgeSeed, smudgeSize, smudgeAmount, masterScale);
+                            double smudge = organicSmudge(noisePx, noisePy, smudgeSeed, smudgeSize, smudgeAmount, masterScale);
                             double smudgeStr = smudge * smudgeOpacity;
                             finalR = finalR * (1.0 - smudgeStr) + smudgeR * smudgeStr;
                             finalG = finalG * (1.0 - smudgeStr) + smudgeG * smudgeStr;
                             finalB = finalB * (1.0 - smudgeStr) + smudgeB * smudgeStr;
                         }
-                        
+
                         if (dustAmount > 0) {
-                            double dust = dustParticles(px, py, dustSeed, dustSize, dustAmount, masterScale);
+                            double dust = dustParticles(noisePx, noisePy, dustSeed, dustSize, dustAmount, masterScale);
                             if (dust > 0) {
                                 finalR = finalR * (1.0 - dust) + dustR * dust;
                                 finalG = finalG * (1.0 - dust) + dustG * dust;
@@ -2633,8 +2818,26 @@ PF_Err SmartRender(
                     }
                 }
             }
+            }; // end renderRows lambda
+
+            if (numThreads <= 1) {
+                renderRows(0, height);
+            } else {
+                std::vector<std::thread> threads;
+                threads.reserve(numThreads);
+                int rowsPerThread = height / numThreads;
+                int remainder = height % numThreads;
+                int yStart = 0;
+                for (int t = 0; t < numThreads; t++) {
+                    int yEnd = yStart + rowsPerThread + (t < remainder ? 1 : 0);
+                    threads.emplace_back(renderRows, yStart, yEnd);
+                    yStart = yEnd;
+                }
+                for (auto& t : threads) t.join();
+            }
+            } // end parallel block
         }
-        
+
         // Check in all parameters
         PF_CHECKIN_PARAM(in_data, &params[PARAM_MASTER_SCALE]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_GAP_WIDTH]);
@@ -2648,6 +2851,7 @@ PF_Err SmartRender(
         PF_CHECKIN_PARAM(in_data, &params[PARAM_INNER_ROUGH_SCALE]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_INNER_JAGGEDNESS]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_INNER_NOTCH]);
+        PF_CHECKIN_PARAM(in_data, &params[PARAM_INNER_EXPANSION]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_MIDDLE1_AMOUNT]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_MIDDLE1_POSITION]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_MIDDLE1_ROUGHNESS]);
@@ -2665,6 +2869,7 @@ PF_Err SmartRender(
         PF_CHECKIN_PARAM(in_data, &params[PARAM_FIBER_COLOR]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_CONTENT_SHADOW_AMOUNT]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_CONTENT_SHADOW_WIDTH]);
+        PF_CHECKIN_PARAM(in_data, &params[PARAM_FIBER_ENABLE]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_FIBER_DENSITY]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_FIBER_LENGTH]);
         PF_CHECKIN_PARAM(in_data, &params[PARAM_FIBER_THICKNESS]);
